@@ -1,0 +1,27 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install package + test deps
+        run: pip install -e . pytest
+      - name: Locate a Chrome/Chromium for the fixture cases
+        # The bench skips browser cases (with a note) when no Chrome is
+        # found; ubuntu-latest ships one, so point the driver at it.
+        run: |
+          CHROME_BIN="$(command -v google-chrome || command -v chromium || command -v chromium-browser || true)"
+          if [ -n "$CHROME_BIN" ]; then echo "GHOST_HANDS_CHROME=$CHROME_BIN" >> "$GITHUB_ENV"; fi
+      - name: Test suite
+        run: python -m pytest tests/ -q
+      - name: Bench (offline suite; live cases are opt-in via --live)
+        run: ghost-hands bench
