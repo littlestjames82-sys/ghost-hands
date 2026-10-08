@@ -1,5 +1,11 @@
 # Ghost Hands
 
+[![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
+[![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.3.0)
+[![CI](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml)
+
 **Playwright drives. Stagehand thinks. Browser Use wanders. Ghost Hands answers for every move.**
 
 Ghost Hands is a standalone, zero-dependency Python package that gives an
@@ -223,6 +229,27 @@ What is proven, and what is not — as of v0.3.0 (Oct 8, 2026):
 - **GhostBus transport** — hands as a bus agent other agents can task.
 - **Policy packs** — Seatbelt/GhostGuard policy bundles; approvals routed
   over GhostBus or phone push.
+
+## Repository map
+
+**Links:** [PyPI](https://pypi.org/project/ghost-hands/) ·
+[Site](https://littlestjames82-sys.github.io/ghost-hands/) ·
+[Release v0.3.0](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.3.0) ·
+[CHANGELOG.md](CHANGELOG.md) · [LAUNCH.md](LAUNCH.md)
+
+- `src/ghost_hands/` — the package, one module per layer: `eyes`
+  (perception), `actions`, `governor`, `trail`, `drivers` (FakeDriver +
+  our CDP ChromiumDriver), `deciders`, `runner`, `export`,
+  `mcp_server`, `cli`, `bench`.
+- `tests/` — the pytest suite (170 tests at v0.3.0).
+- Bench — `ghost-hands bench` (offline, 82 cases at v0.3.0) and
+  `ghost-hands bench --live` (opt-in real-web cases); bench code lives
+  in `src/ghost_hands/bench.py`.
+- `examples/` — sample steps and policy files for `ghost-hands run`.
+- `site/` — the project site source, deployed to GitHub Pages by
+  `.github/workflows/pages.yml`.
+- `LAUNCH.md` — the launch runbook and copy pack, as written at launch.
+- `PLAN.md` — the field survey and design notes the build started from.
 
 ## License
 
