@@ -19,9 +19,10 @@ browser; we did not write a browser engine and don't claim to have.)
 From [Ghost Developer Studio](https://github.com/littlestjames82-sys).
 MIT licensed.
 
-> Status: v0.3.0, built and benched locally. **Not yet published** — the
-> future homes are PyPI `ghost-hands` and
-> [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands).
+> Status: v0.3.0 — **live on GitHub**:
+> [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands),
+> site at [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
+> The PyPI listing (`ghost-hands`) is being registered and lands at launch.
 
 ## What's new in 0.3.0
 
