@@ -1,5 +1,7 @@
 # Ghost Hands
 
+[![Ghost Hands — governed, recorded, replayable agent hands](docs/social-preview.png)](https://github.com/littlestjames82-sys/ghost-hands)
+
 [![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
