@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions & discussion
+    url: https://github.com/littlestjames82-sys/ghost-hands/discussions
+    about: Ask how something works, share a run, or talk through an idea before filing it
+  - name: Ghost Hands on PyPI
+    url: https://pypi.org/project/ghost-hands/
+    about: The published package — releases, files, and version history
+  - name: Project site
+    url: https://littlestjames82-sys.github.io/ghost-hands/
+    about: What Ghost Hands is, the verified numbers, and the honest status
