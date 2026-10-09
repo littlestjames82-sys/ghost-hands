@@ -144,9 +144,16 @@ bench case on real Chromium (local fixtures) unless noted:
 
 ## Roadmap beyond v0.3
 - Android body: MrGhosty's accessibility service speaks the same action protocol —
-  one hands, phone + web.
-- GhostBus transport: hands as a bus agent other agents can task.
+  one hands, phone + web. **BUILT in v0.5.0** (AndroidDriver + the Ghost
+  Hands bridge in MrGhosty v1.6.0, loopback + pairing token; proven
+  against the bridge contract via a fake bridge; on-device proof
+  pending Ryan's install + accessibility grant).
+- GhostBus transport: hands as a bus agent other agents can task. (Done, v0.4.0.)
 - Seatbelt/GhostGuard policy packs; approval over GhostBus/phone push.
+  (Policy packs + bus approvals done, v0.4.0; **phone approver BUILT in
+  v0.6.0** — PhoneApprover + the approvals endpoints in the MrGhosty
+  v1.7.0 bridge; decisions exist only on the phone's own UI, the API
+  has no decision endpoint; on-device proof pending Ryan's install.)
 - Live-model driving evaluation (bring a key; measure a named model honestly).
 
 ## Rules

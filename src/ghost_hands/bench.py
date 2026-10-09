@@ -1784,6 +1784,493 @@ def case_live_wikipedia_search():
     return True
 
 
+# ---------------------------------------------------------------------------
+# v0.4: GhostBus agent mode, the sim phone body, conformance, policy packs
+# ---------------------------------------------------------------------------
+
+
+def case_bus_agent_real_server():
+    """The whole bus loop against the REAL GhostBus node server: two
+    tasks (fake web + real Chromium), one consequential submit approved
+    by a second client over the bus mid-run, trails uploaded as shared
+    files. SKIP only when node/GhostBus cannot run here."""
+    from .busagent import BusDemoUnavailable, run_bus_demo
+
+    try:
+        evidence = run_bus_demo(approval_timeout=60)
+    except BusDemoUnavailable as exc:
+        return (SKIP, str(exc))
+    assert evidence["fake_result"]["status"] == "done", evidence["fake_result"]
+    assert evidence["chrome_result"]["status"] == "done", evidence["chrome_result"]
+    assert evidence["chrome_task_status"] == "done"
+    approvals = evidence["approval_events"]
+    assert approvals and approvals[-1].get("approved") is True, approvals
+    assert evidence["fake_trail_events"] > 5
+    assert evidence["chrome_trail_events"] > 5
+    return True
+
+
+def case_simphone_notes_flow():
+    from .simphone import SimPhoneDriver
+
+    driver = SimPhoneDriver()
+    trail = Trail()
+    runner = Runner(
+        driver,
+        ScriptedDecider(
+            [
+                {"kind": "click", "target": 1},  # Notes icon
+                {"kind": "click", "target": 1},  # New note
+                {"kind": "type", "target": 1, "text": "hello ghost"},
+                {"kind": "click", "target": 2},  # Save
+                {"kind": "press", "key": "Back"},
+            ]
+        ),
+        trail=trail,
+    )
+    report = runner.run("bench: sim phone notes")
+    assert report.stop_reason == "done", report.summary
+    assert driver.notes == ["hello ghost"], driver.notes
+    assert driver.current_url() == "phone://home"
+    # The phone's screenshot is a real PNG.
+    result = driver.act(A.screenshot(), None)
+    assert driver.last_screenshot[:8] == b"\x89PNG\r\n\x1a\n"
+    assert "PNG" in result
+    return True
+
+
+def case_conformance_two_bodies():
+    """One abstract scenario, two bodies (fake web + sim phone): the
+    destructive action is denied without an approver and lands with
+    one; the typed note survives the denial. (The three-body version,
+    incl. Chromium, is tests/test_conformance.py.)"""
+    from .deciders import Decider
+    from .simphone import SimPhoneDriver
+
+    scenario = ["Notes", "New note", "Note text", "Save", "Delete all"]
+
+    class Intent(Decider):
+        def __init__(self):
+            self.i = 0
+
+        def decide(self, goal, element_map, history):
+            if self.i >= len(scenario):
+                return A.done("scenario complete")
+            name = scenario[self.i]
+            self.i += 1
+            el = element_map.find_by_text(name)
+            assert el is not None, f"{name!r} not on the map"
+            if name == "Note text":
+                return A.type(el.number, "hello ghost")
+            return A.click(el.number)
+
+    pages = {
+        "https://conf.local/": (
+            '<!doctype html><html><head><title>Home</title></head>'
+            '<body><a href="https://conf.local/notes">Notes</a></body></html>'
+        ),
+        "https://conf.local/notes": (
+            '<!doctype html><html><head><title>Notes</title></head><body>'
+            '<textarea id="note" placeholder="Note text"></textarea>'
+            "<button>New note</button>"
+            '<button data-append-to="items" data-from-field="note">Save</button>'
+            '<ul id="items"></ul>'
+            '<form action="https://conf.local/cleared">'
+            '<button type="submit">Delete all notes</button></form>'
+            "</body></html>"
+        ),
+        "https://conf.local/cleared": (
+            "<!doctype html><html><body><h1>Deleted</h1></body></html>"
+        ),
+    }
+    fake = FakeDriver(pages, start_url="https://conf.local/")
+    trail = Trail()
+    rep = Runner(fake, Intent(), trail=trail).run("conformance")
+    assert rep.stop_reason == "denied", rep.summary
+    assert "hello ghost" in fake.snapshot_html()
+    assert fake.submissions == []
+
+    phone = SimPhoneDriver()
+    rep2 = Runner(phone, Intent(), approver=lambda a: True).run("conformance")
+    assert rep2.stop_reason == "done", rep2.summary
+    assert phone.notes == []  # typed, saved, then deleted with approval
+    return True
+
+
+def case_policy_packs():
+    from .policies import load_pack
+
+    # readonly: the write never executes.
+    pack = load_pack("readonly")
+    _d, trail, report = _run(
+        LOGIN_PAGES,
+        [{"kind": "type", "target": 1, "text": "ghost"}],
+        policy=pack.policy,
+        start="https://app.local/login",
+    )
+    assert report.stop_reason == "denied"
+    assert not [ev for ev in trail.events if ev["type"] == "execute"]
+    # strict: a write asks; an approver lets it through.
+    asked = []
+    pack = load_pack("strict")
+    _d, _t, report = _run(
+        LOGIN_PAGES,
+        [{"kind": "type", "target": 1, "text": "ghost"}],
+        approver=lambda a: asked.append(a.kind) or True,
+        policy=pack.policy,
+        start="https://app.local/login",
+    )
+    assert report.stop_reason == "done" and asked == ["type"]
+    assert pack.approval_timeout == 120.0
+    # standard: unchanged default posture.
+    pack = load_pack("standard")
+    assert pack.policy == Policy() and pack.approval_timeout == 600.0
+    # unknown pack: loud.
+    try:
+        load_pack("nope")
+    except HandsError:
+        pass
+    else:
+        raise AssertionError("unknown pack did not raise")
+    return True
+
+
+# ---------------------------------------------------------------------------
+# v0.5: the real Android body (AndroidDriver vs a fake MrGhosty bridge)
+# ---------------------------------------------------------------------------
+
+_BENCH_BRIDGE_TOKEN = "bench-pairing-token"
+
+
+def _bench_android_bridge():
+    """A minimal fake of the MrGhosty Ghost Hands bridge (the same
+    HTTP/JSON contract as the Java bridge + tests/fake_android_bridge):
+    launcher home -> Notes -> editor -> saved note, token auth,
+    404/409 target errors. Returns (server, base_url, state)."""
+    import base64 as _b64
+
+    state = {
+        "screen": "home",
+        "notes": [],
+        "draft": "",
+        # v0.6 approvals: created approval records + the simulated
+        # phone user's decisions (the bench's finger — decisions are
+        # NOT an HTTP endpoint here either, mirroring the real bridge).
+        "approvals": {},
+        "decisions": {},
+    }
+
+    def elements():
+        screen = state["screen"]
+        if screen == "home":
+            raw = [
+                ("Button", "app_icon", "Notes", None),
+                ("Button", "app_icon", "Settings", None),
+            ]
+        elif screen == "notes":
+            raw = [
+                ("TextView", "note", note, note) for note in state["notes"]
+            ] + [
+                ("Button", "button", "New note", None),
+                ("Button", "button", "Delete all notes", None),
+            ]
+        elif screen == "notes_edit":
+            raw = [
+                ("EditText", "text_field", "Note text", state["draft"]),
+                ("Button", "button", "Save", None),
+            ]
+        else:
+            raw = []
+        return [
+            {
+                "ref": f"0/{i}",
+                "tag": tag,
+                "role": role,
+                "name": name,
+                "value": value,
+                "attrs": {"package": "com.example.notes"},
+            }
+            for i, (tag, role, name, value) in enumerate(raw)
+        ]
+
+    packages = {
+        "home": "com.android.launcher3",
+        "notes": "com.example.notes",
+        "notes_edit": "com.example.notes",
+    }
+
+    class Handler(BaseHTTPRequestHandler):
+        def log_message(self, *args):
+            pass
+
+        def _send(self, code, obj):
+            data = json.dumps(obj).encode("utf-8")
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def _authed(self):
+            if self.headers.get("X-Ghost-Hands-Token") != _BENCH_BRIDGE_TOKEN:
+                self._send(401, {"error": "bad or missing pairing token"})
+                return False
+            return True
+
+        def do_GET(self):  # noqa: N802 - stdlib handler API
+            if self.path.startswith("/v1/approvals/"):
+                if not self._authed():
+                    return
+                rid = self.path[len("/v1/approvals/"):]
+                rec = state["approvals"].get(rid)
+                if rec is None:
+                    return self._send(
+                        404, {"error": f"unknown approval id: {rid}"}
+                    )
+                status = state["decisions"].get(rid)
+                if status is None:
+                    status = (
+                        "expired"
+                        if time.time() - rec["created"] > rec["timeout_seconds"]
+                        else "pending"
+                    )
+                out = {"ok": True, "id": rid, "status": status}
+                if status in ("approved", "denied"):
+                    out["decided_by"] = "phone"
+                    out["decided_at"] = rec.get("decided_at")
+                return self._send(200, out)
+            if self.path != "/v1/status" or not self._authed():
+                return
+            self._send(
+                200,
+                {
+                    "ok": True,
+                    "protocol": 1,
+                    "app": "MrGhosty",
+                    "version": "1.7.0",
+                    "service_connected": True,
+                    "foreground_package": packages[state["screen"]],
+                    "api_level": 34,
+                },
+            )
+
+        def do_POST(self):  # noqa: N802 - stdlib handler API
+            if not self._authed():
+                return
+            length = int(self.headers.get("Content-Length") or 0)
+            body = (
+                json.loads(self.rfile.read(length).decode("utf-8"))
+                if length
+                else {}
+            )
+            if self.path == "/v1/approvals":
+                rid = body.get("id")
+                timeout = body.get("timeout_seconds")
+                if (
+                    not rid
+                    or not body.get("kind")
+                    or not body.get("summary")
+                    or not isinstance(timeout, (int, float))
+                    or timeout <= 0
+                ):
+                    return self._send(400, {"error": "bad approval payload"})
+                if rid in state["approvals"]:
+                    return self._send(
+                        409, {"error": f"duplicate approval id: {rid}"}
+                    )
+                rec = dict(body)
+                rec["created"] = time.time()
+                state["approvals"][rid] = rec
+                return self._send(201, {"ok": True, "id": rid, "status": "pending"})
+            if self.path == "/v1/perceive":
+                pkg = packages[state["screen"]]
+                return self._send(
+                    200,
+                    {
+                        "ok": True,
+                        "url": f"android://{pkg}",
+                        "package": pkg,
+                        "elements": elements(),
+                    },
+                )
+            if self.path != "/v1/act":
+                return self._send(404, {"error": "unknown endpoint"})
+            action = body.get("action") or {}
+            kind = action.get("kind")
+            ref = body.get("target_ref")
+            target = None
+            for el in elements():
+                if el["ref"] == ref:
+                    target = el
+                    break
+            if kind in ("click", "type"):
+                if target is None:
+                    return self._send(
+                        404, {"error": f"target missing: ref {ref}"}
+                    )
+                expected = body.get("expected") or {}
+                key = (target["tag"], target["role"], target["name"])
+                want = (
+                    expected.get("tag"),
+                    expected.get("role"),
+                    expected.get("name"),
+                )
+                if expected and key != want:
+                    return self._send(
+                        409, {"error": f"target mismatch: ref {ref}"}
+                    )
+            if kind == "click":
+                name = target["name"]
+                if name == "Notes":
+                    state["screen"] = "notes"
+                elif name == "New note":
+                    state["draft"] = ""
+                    state["screen"] = "notes_edit"
+                elif name == "Save":
+                    state["notes"].append(state["draft"])
+                    state["screen"] = "notes"
+                elif name == "Delete all notes":
+                    state["notes"] = []
+                return self._send(200, {"ok": True, "result": f"tapped {name}"})
+            if kind == "type":
+                state["draft"] = action.get("text") or ""
+                return self._send(200, {"ok": True, "result": "typed"})
+            if kind == "press":
+                if action.get("key") == "Back":
+                    state["screen"] = "home"
+                return self._send(200, {"ok": True, "result": "pressed"})
+            if kind == "screenshot":
+                png = _b64.b64encode(b"\x89PNG\r\n\x1a\n bench").decode()
+                return self._send(
+                    200, {"ok": True, "png_base64": png, "bytes": 14}
+                )
+            if kind == "extract":
+                text = "\n".join(el["name"] for el in elements())
+                return self._send(200, {"ok": True, "result": text, "text": text})
+            if kind == "scroll":
+                return self._send(200, {"ok": True, "result": "scrolled"})
+            return self._send(
+                400, {"error": f"unsupported on Android body: {kind}"}
+            )
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server, f"http://127.0.0.1:{server.server_address[1]}", state
+
+
+def case_android_bridge_notes_flow():
+    """AndroidDriver through the bridge contract: the notes scenario
+    runs governed end to end; the consequential delete is denied with
+    no approver and the note survives; the screenshot is real PNG
+    bytes off the wire."""
+    from .android_driver import AndroidDriver
+
+    server, url, state = _bench_android_bridge()
+    try:
+        driver = AndroidDriver(bridge_url=url, token=_BENCH_BRIDGE_TOKEN)
+        status = driver.status()
+        assert status["app"] == "MrGhosty" and status["protocol"] == 1
+        trail = Trail()
+        runner = Runner(
+            driver,
+            ScriptedDecider(
+                [
+                    {"kind": "click", "target": 1},  # Notes icon
+                    {"kind": "click", "target": 1},  # New note
+                    {"kind": "type", "target": 1, "text": "hello ghost"},
+                    {"kind": "click", "target": 2},  # Save
+                    {"kind": "click", "target": 3},  # Delete all (denied)
+                ]
+            ),
+            trail=trail,
+        )
+        report = runner.run("bench: android notes flow")
+        assert report.stop_reason == "denied", report.summary
+        assert state["notes"] == ["hello ghost"], state["notes"]
+        govern = [ev for ev in trail.events if ev["type"] == "govern"]
+        assert govern[-1]["classification"] == "consequential"
+        executes = [ev for ev in trail.events if ev["type"] == "execute"]
+        assert executes and executes[0]["element"]["body_ref"] == "0/0"
+        result = driver.act(A.screenshot(), None)
+        assert driver.last_screenshot[:8] == b"\x89PNG\r\n\x1a\n"
+        assert "PNG" in result
+    finally:
+        server.shutdown()
+    return True
+
+
+def case_phone_approval_notes_flow():
+    """v0.6 approvals by phone: the Android notes flow's consequential
+    delete is decided on the 'phone' (the bench bridge) mid-run via
+    PhoneApprover — the simulated phone user approves from another
+    thread, the delete executes, and the trail carries channel=phone
+    approval events. The typed note text never appears in the approval
+    payload that crossed the wire."""
+    from .android_driver import AndroidDriver
+    from .phone_approver import ObservingDecider, PhoneApprover
+
+    server, url, state = _bench_android_bridge()
+    try:
+        driver = AndroidDriver(bridge_url=url, token=_BENCH_BRIDGE_TOKEN)
+        trail = Trail()
+        approver = PhoneApprover(
+            bridge_url=url,
+            token=_BENCH_BRIDGE_TOKEN,
+            timeout=30,
+            poll_interval=0.05,
+            trail=trail,
+        )
+
+        def phone_user():
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                for rid in list(state["approvals"]):
+                    if rid not in state["decisions"]:
+                        state["decisions"][rid] = "approved"
+                        state["approvals"][rid]["decided_at"] = time.time()
+                        return
+                time.sleep(0.05)
+
+        finger = threading.Thread(target=phone_user, daemon=True)
+        finger.start()
+        runner = Runner(
+            driver,
+            ObservingDecider(
+                ScriptedDecider(
+                    [
+                        {"kind": "click", "target": 1},  # Notes icon
+                        {"kind": "click", "target": 1},  # New note
+                        {"kind": "type", "target": 1, "text": "hello ghost"},
+                        {"kind": "click", "target": 2},  # Save
+                        {"kind": "click", "target": 3},  # Delete all (asks)
+                    ]
+                ),
+                approver,
+            ),
+            approver=approver,
+            trail=trail,
+        )
+        report = runner.run("bench: phone approval flow")
+        finger.join(timeout=5)
+        assert report.stop_reason == "done", report.summary
+        assert state["notes"] == [], state["notes"]
+        events = [ev for ev in trail.events if ev["type"] == "approval"]
+        assert len(events) == 2, events
+        request, decision = events
+        assert request["channel"] == "phone" and request["phase"] == "request"
+        assert "Delete all notes" in request["summary"], request["summary"]
+        assert decision["phase"] == "decision" and decision["approved"] is True
+        assert decision["decided_by"] == "phone"
+        # The approval payload that crossed the wire is the SAFE
+        # summary only: the typed text is not in it.
+        wire = json.dumps(state["approvals"])
+        assert "hello ghost" not in wire
+        assert _BENCH_BRIDGE_TOKEN not in wire
+    finally:
+        server.shutdown()
+    return True
+
+
 LIVE_CASES = [
     ("live: example.com — navigate, perceive, follow the link", case_live_example_com),
     ("live: wikipedia — RuleDecider searches 'Oakdale, Tennessee'", case_live_wikipedia_search),
@@ -1877,6 +2364,12 @@ CASES = [
     ("v3 wait_for: delayed element caught; impossible wait times out on the record", case_v3_wait_for),
     ("v3 click_at: raw coordinates land; trail marks raw:true", case_v3_click_at_raw),
     ("v3 mcp: fill_form over hands_act", case_v3_mcp_fill_form),
+    ("v4 bus: agent mode E2E on the REAL GhostBus node server (fake + Chromium, bus approval)", case_bus_agent_real_server),
+    ("v4 simphone: notes flow end to end + real PNG screenshot", case_simphone_notes_flow),
+    ("v4 conformance: one scenario, fake web + sim phone (deny, then approve)", case_conformance_two_bodies),
+    ("v4 policy packs: readonly denies, strict asks, standard default, unknown loud", case_policy_packs),
+    ("v5 android: driver over the bridge contract — notes flow governed, delete denied, PNG off the wire", case_android_bridge_notes_flow),
+    ("v6 phone approvals: consequential delete approved on the phone mid-run; redacted payload", case_phone_approval_notes_flow),
 ]
 
 

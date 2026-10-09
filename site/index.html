@@ -187,7 +187,12 @@
     <div class="install">
       <code>$ pip install ghost-hands</code><span class="soon">Live on PyPI</span>
       <p>v0.3.0 is live on <a href="https://pypi.org/project/ghost-hands/">PyPI</a>
-      and <a href="https://github.com/littlestjames82-sys/ghost-hands">GitHub</a>.
+      and <a href="https://github.com/littlestjames82-sys/ghost-hands">GitHub</a>;
+      the current build is <strong>v0.6.0</strong> — approvals by phone:
+      consequential actions can be decided on Ryan's phone (a MrGhosty
+      notification + in-app Approve/Deny) through the same bridge the
+      AndroidDriver uses, alongside GhostBus agent mode, the Body
+      Protocol, and policy packs.
       Nothing here is vaporware: every number below was measured on the
       current build.</p>
     </div>
@@ -257,16 +262,40 @@
         only, never stored). Plus tabs, session save/load, real screenshots,
         and a stdlib MCP server.</p>
       </div>
+      <div class="card">
+        <div class="glyph">🚌</div>
+        <h3>Works the bus (new in 0.4)</h3>
+        <p><code>ghost-hands bus-agent</code> joins a GhostBus workspace as the
+        agent other agents task: it claims governed work, posts progress,
+        uploads its trail as a shared file — and when the governor asks, the
+        approval request itself travels over the bus. Policy packs
+        (readonly / standard / strict) tune the leash per deployment.</p>
+        <div class="classes">
+          <span class="chip readonly">readonly</span>
+          <span class="chip write">standard</span>
+          <span class="chip consequential">strict</span>
+        </div>
+      </div>
+      <div class="card">
+        <div class="glyph">📱</div>
+        <h3>One hands, many bodies</h3>
+        <p>A written Body Protocol defines the driver contract, proven by
+        three bodies — real Chromium, an in-memory web, and a simulated
+        phone with apps, notes, toggles, and rendered PNG screenshots —
+        all driven by the same runner, governor, and trail. The Android
+        driver is specified in the protocol; the simulator is its
+        rehearsal.</p>
+      </div>
     </div>
   </section>
 
   <section>
     <h2>Verified, <span class="accent">not vibes</span></h2>
-    <p class="lede">Measured on the v0.3.0 build, October 8, 2026 — the same
+    <p class="lede">Measured on the v0.6.0 build, October 8, 2026 — the same
     suites that ship in the repo.</p>
     <div class="stats">
-      <div class="stat"><div class="num">170</div><div class="lbl">pytest tests passing</div></div>
-      <div class="stat"><div class="num">82/82</div><div class="lbl">bench cases (offline suite)</div></div>
+      <div class="stat"><div class="num">299</div><div class="lbl">pytest tests passing</div></div>
+      <div class="stat"><div class="num">88/88</div><div class="lbl">bench cases (offline suite)</div></div>
       <div class="stat"><div class="num">2/2</div><div class="lbl">live cases: example.com + a real Wikipedia search</div></div>
       <div class="stat"><div class="num">0</div><div class="lbl">runtime dependencies</div></div>
     </div>
@@ -281,17 +310,28 @@
       unproven and depends on the model you bring. The Chromium driver is
       proven on fixture pages plus example.com and Wikipedia — not on the
       whole web. There are no head-to-head speed benchmarks against other
-      tools, and we won't claim any we haven't run.
+      tools, and we won't claim any we haven't run. The bus agent is proven
+      against the real GhostBus server booted locally (both its shapes);
+      the Android driver and the MrGhosty bridge are built and proven
+      against the bridge wire contract — proof on a physical phone is
+      still ahead.
     </div>
   </section>
 
   <section>
     <h2>Where it's <span class="accent">headed</span></h2>
     <p class="lede">
-      One pair of hands, more bodies: the same action protocol gains an
-      Android body next (via MrGhosty, our phone agent), and a GhostBus
-      transport so other agents can task the hands. Policy packs from Agent
-      Seatbelt / GhostGuard plug into the same governor.
+      v0.4.0 shipped the GhostBus transport (other agents can task the
+      hands, and approvals route back over the bus), policy packs
+      (readonly / standard / strict), and the Body Protocol with a
+      simulated phone body. v0.5.0 built the Android body itself —
+      MrGhosty's accessibility service hosts the bridge and
+      AndroidDriver speaks the same protocol, so one pair of hands
+      works the phone and the web. v0.6.0 added the phone approver:
+      when a run hits a consequential action, the question goes to
+      Ryan's phone and only his tap answers it — the bridge API can
+      ask, but it can never approve. Next: proving it on Ryan's
+      phone.
     </p>
   </section>
 

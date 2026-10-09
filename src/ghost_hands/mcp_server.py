@@ -11,11 +11,17 @@ governed surface other tools leave raw:
 - ``hands_run`` — run scripted steps through a full Runner (FakeDriver, or
   ChromiumDriver when driver="chromium").
 - ``hands_trail`` — return this session's trail and accounting.
+
+Policy pack: set ``GHOST_HANDS_POLICY`` (readonly | standard | strict)
+to run the whole MCP session under a named pack from
+``ghost_hands.policies``. An unknown name fails loudly at startup —
+never a silent fall back to the default policy.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import sys
 from typing import Any, Optional
 
@@ -25,6 +31,7 @@ from .deciders import ScriptedDecider
 from .errors import HandsError
 from .eyes import ElementMap
 from .governor import ASK, Governor
+from .policies import load_pack
 from .runner import Runner
 from .trail import Trail
 
@@ -82,7 +89,11 @@ class HandsSession:
     def __init__(self) -> None:
         self.driver = FakeDriver(DEMO_PAGES)
         self.trail = Trail()
-        self.governor = Governor()
+        pack_name = os.environ.get("GHOST_HANDS_POLICY")
+        self.policy_pack = load_pack(pack_name) if pack_name else None
+        self.governor = (
+            Governor(self.policy_pack.policy) if self.policy_pack else Governor()
+        )
         self.last_map: Optional[ElementMap] = None
         self.step = 0
         self._wire_sink(self.driver)
@@ -186,6 +197,7 @@ def _run(session: HandsSession, args: dict) -> dict:
             runner = Runner(
                 driver,
                 ScriptedDecider(steps),
+                governor=session.governor,
                 approver=approver,
                 trail=trail,
                 start_url=args.get("start_url"),
@@ -199,6 +211,7 @@ def _run(session: HandsSession, args: dict) -> dict:
         runner = Runner(
             driver,
             ScriptedDecider(steps),
+            governor=session.governor,
             approver=approver,
             trail=trail,
             start_url=args.get("start_url"),

@@ -1,7 +1,5 @@
 # Ghost Hands
 
-[![Ghost Hands — governed, recorded, replayable agent hands](docs/social-preview.png)](https://github.com/littlestjames82-sys/ghost-hands)
-
 [![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -27,10 +25,117 @@ browser; we did not write a browser engine and don't claim to have.)
 From [Ghost Developer Studio](https://github.com/littlestjames82-sys).
 MIT licensed.
 
-> Status: v0.3.0 — **LIVE**: [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
+> Status: v0.6.0 — built and verified locally (approvals by phone:
+> consequential asks can be decided on Ryan's phone through the
+> MrGhosty v1.7.0 bridge); PyPI and
+> GitHub serve v0.3.0 until the next release ships:
+> [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
 > (`pip install ghost-hands`) ·
 > [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
 > [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
+
+## What's new in 0.6.0
+
+- **Approvals by phone.** A run's "ask" decisions can be routed to
+  Ryan's phone: `PhoneApprover` (`phone_approver.py`) posts a
+  redacted approval request to the Ghost Hands bridge in MrGhosty
+  v1.7.0, which raises a high-importance notification ("Ghost Hands
+  needs approval") with **Approve** / **Deny** actions, mirrored by a
+  card in MrGhosty's Device tab. The decision returns over the
+  bridge; denied, expired, timed-out, and unreachable all mean **no**
+  — silence is never consent. Works with every driver
+  (`ghost-hands run --approver phone …` — the phone can approve a
+  desktop Chromium run too), and in bus-agent mode via
+  `--approval-channel phone` (the bus gets a courtesy comment; the
+  approval itself is never requested from the bus). Approvals route
+  to Ryan's phone through the MrGhosty bridge (notification +
+  in-app decision) when the bridge is reachable; it is a local
+  bridge channel, not a cloud push service. See
+  [docs/APPROVALS.md](docs/APPROVALS.md).
+- **Decisions are phone-only, by construction.** The bridge API can
+  create and read approval requests but has **no decision
+  endpoint** — a token holder can never approve their own request.
+  The only deciders are the notification actions and the in-app
+  card, on the phone itself.
+- **Summaries are redacted before they leave the machine.** A
+  request carries the action kind, classification, target
+  descriptor, and current URL/package; `type` actions show the
+  target and a character count, never the typed text; `fill_form`
+  shows field names, never values. The pairing token never appears
+  in summaries, trail events, errors, or logs.
+- **`ghost-hands phone-approval-test`** — sends one harmless test
+  request ("approving this runs nothing") and waits for the phone
+  decision: the one-command on-device proof.
+
+## What's new in 0.5.0
+
+- **The real Android body.** `AndroidDriver` (`android_driver.py`)
+  drives a real phone through the **Ghost Hands bridge** in the
+  MrGhosty Android app (v1.6.0): a loopback-only HTTP server hosted by
+  MrGhosty's accessibility service on `127.0.0.1:8378`, authenticated
+  by a pairing token (shown in MrGhosty's Device tab; passed via
+  `GHOST_HANDS_ANDROID_TOKEN`, never stored). Perception walks the
+  live accessibility tree into the same numbered ElementMap (each
+  element keeps its bridge `ref` as `body_ref`); actions re-verify
+  the target's {tag, role, name} key at the bridge before anything
+  moves, and stale targets come back as the same "target missing /
+  target mismatch" errors the Runner heals from on the web. The
+  unchanged Runner/Governor drive it — governance is identical,
+  including the consequential gate. Web-only actions fail honestly.
+  Forward the bridge with `adb forward tcp:8378 tcp:8378`, check it
+  with `ghost-hands android-status`, then
+  `ghost-hands run --driver android …` (or task it over GhostBus with
+  `"driver": "android"`). The driver and the bridge are built and the
+  full flow is proven against the bridge contract (fake-bridge
+  conformance suite + bench case); **on-device proof is pending
+  Ryan's install of MrGhosty v1.6.0 + the accessibility grant**.
+- **Element `body_ref`.** Elements now carry an optional opaque
+  body-native target reference in their descriptor, so trails record
+  exactly which node a phone action touched.
+
+## What's new in 0.4.0
+
+- **GhostBus agent mode.** `ghost-hands bus-agent` puts the hands on
+  [GhostBus](https://github.com/littlestjames82-sys/ghostbus) as the
+  agent `ghost-hands` (role: hands). It claims tasks addressed to it or
+  tagged `hands` — respecting claim leases, `blockedBy`, and the bus's
+  own needs-approval gate (gated tasks are never claimed) — runs them
+  through the same Runner/Governor/Trail, posts progress comments,
+  uploads the JSONL trail as a shared bus file, and completes with a
+  structured report. Works against the single-workspace relay and
+  hosted workspaces (`--workspace`, `/w/<id>/`), key from flag/env only,
+  never stored. `ghost-hands bus-demo` proves the whole loop against
+  the **real** GhostBus node server — including a consequential submit
+  approved by a second client over the bus, mid-run.
+- **Approvals over the bus.** When the Governor says "ask" during a bus
+  run, the approver posts `APPROVAL NEEDED: <class> <summary> — reply
+  APPROVE <run-id> or DENY <run-id>` as a task comment and a message to
+  the task's creator, then waits (long-poll) up to the approval
+  timeout. Deny or timeout = denied, on the record: both the request
+  and the decision land in the trail as `approval` events.
+- **The Body Protocol.** [docs/BODY_PROTOCOL.md](docs/BODY_PROTOCOL.md)
+  formalizes the driver contract — perceive → numbered ElementMap,
+  `act(action)` → outcome, optional capability flags — and the shared
+  action vocabulary, so new bodies can be built against a written spec.
+  A conformance scenario (same abstract script on every body) proves
+  it: the destructive step is denied with no approver and lands with
+  one, and the trail records identical shapes, on FakeDriver,
+  ChromiumDriver, and the new phone body alike.
+- **SimPhoneDriver.** A simulated Android-style body (in-memory):
+  home screen with app icons, a Notes app (type, save, notes persist;
+  a "Delete all notes" button that classifies consequential), a
+  Settings app with toggles, a Back/Home navigation stack, and real
+  PNG screenshots rendered with stdlib only. The existing
+  Runner/Governor/deciders drive it unchanged — it is the rehearsal
+  body for the real Android body — which has since landed (v0.5.0,
+  above): the same Runner/Governor drive SimPhoneDriver in tests and
+  a real phone through AndroidDriver.
+- **Policy packs.** Named, loadable governor bundles
+  (`ghost_hands.policies`): `readonly` (writes + consequential denied
+  outright), `standard` (the default posture), `strict` (writes ask
+  too; approvals on a 120s leash). `--policy-pack` on `run` and
+  `bus-agent`; the MCP server honors `GHOST_HANDS_POLICY`. Unknown
+  pack names are a loud error, never a silent fallback.
 
 ## What's new in 0.3.0
 
@@ -139,23 +244,32 @@ driver.close()
 | **Hands** (`actions.py`) | Typed, JSON-serializable actions: navigate, click, type, press (with key chords), select, scroll, hover, double/right click, drag, click_at (raw coordinates), fill_form, set_file, download, extract (text/list/table/network), screenshot (to a real PNG file), pdf, set_viewport, wait / wait_for, tabs, session save/load, done. Targets are element numbers, never raw selectors. |
 | **Governor** (`governor.py`) | Classifies every action *before* execution and applies a policy: allow / ask / deny per class, a domain allowlist, blocked domains. Form submits and anything smelling like pay / send / delete / publish / transfer is **consequential**. |
 | **Trail** (`trail.py`) | JSONL provenance: perceive → decide → govern → execute → result → stop (plus `heal`, `dialog`, `net`, and `download` events), with per-run accounting (steps, perception chars, ~tokens at chars/4, actions by class). Govern + execute are recorded **before** the action runs. |
-| **Bodies** (`drivers.py`) | `FakeDriver` (in-memory mini-web for tests/demos) and `ChromiumDriver` (real Chromium via our own CDP client: auto-wait, tabs, session save/load, screenshots to disk, downloads/uploads, network capture, dialog policy, viewport emulation, PDF, env-proxy support with a credential-injecting local relay, stale-target detection). |
+| **Bodies** (`drivers.py`, `simphone.py`, `android_driver.py`) | `FakeDriver` (in-memory mini-web for tests/demos), `ChromiumDriver` (real Chromium via our own CDP client: auto-wait, tabs, session save/load, screenshots to disk, downloads/uploads, network capture, dialog policy, viewport emulation, PDF, env-proxy support with a credential-injecting local relay, stale-target detection), `SimPhoneDriver` (simulated Android-style phone: apps, notes, toggles, Back/Home, rendered PNG screenshots), and `AndroidDriver` (a real phone via the MrGhosty app's Ghost Hands bridge: loopback HTTP/JSON, pairing-token auth, accessibility-tree perception with `body_ref` targets, key-verified actions, real screenshots on API 30+, loopback-only by construction). The contract every body signs is [docs/BODY_PROTOCOL.md](docs/BODY_PROTOCOL.md). |
 | **Brains** (`deciders.py`) | `ScriptedDecider` (explicit steps), `RuleDecider` (deterministic offline rules — "go to…", "click…", "type… into…", "search for…"), `OpenAICompatibleDecider` (any OpenAI-compatible endpoint; key from env only, never stored; wire protocol proven against a local stub server). |
 | **Runner** (`runner.py`) | The loop, with a step budget, stuck detection (same action 3×, or an unchanged map for 3 steps), and self-healing: a target that moved mid-flight is re-found by descriptor and retried once, heal logged. Honest stop reasons: `done` / `budget` / `denied` / `stuck` / `error`. Silence is never consent: an "ask" with no approver is a denial. |
 | **Replay export** (`export.py`) | Graduate a trail into a standalone Ghost Hands script that replays the executed steps deterministically — no model, still governed. Chromium body, or a fake body with the mini-web embedded. |
-| **MCP server** (`mcp_server.py`) | Stdlib-only stdio MCP: `hands_perceive`, `hands_act`, `hands_run`, `hands_trail`. Consequential actions are denied on this channel (no approver) with an explanation. |
+| **Policy packs** (`policies.py`) | Named governor bundles as data: `readonly` (perception only — writes and consequential denied outright), `standard` (the default), `strict` (writes ask too, 120s approval leash). Each pack sets per-class allow/ask/deny, an approval timeout, and allowlist additions. |
+| **Bus mode** (`busclient.py`, `busagent.py`) | A stdlib GhostBus REST client (single-workspace relay or hosted `/w/<id>/`; key + agent token from flag/env, memory only) and the agent loop on top: register as `ghost-hands`, claim addressed/tagged tasks (leases, `blockedBy`, and the bus's needs-approval gate respected), run them governed, route approvals back over the bus, upload the trail as a shared file, complete with a structured report. |
+| **MCP server** (`mcp_server.py`) | Stdlib-only stdio MCP: `hands_perceive`, `hands_act`, `hands_run`, `hands_trail`. Consequential actions are denied on this channel (no approver) with an explanation. Honors the `GHOST_HANDS_POLICY` env var (a policy pack name). |
 
 ## CLI
 
 ```bash
 ghost-hands demo                                   # built-in fake-web demo
-ghost-hands bench                                  # 82-case verification suite
+ghost-hands bench                                  # 87-case verification suite
 ghost-hands bench --live                           # + live cases: example.com, Wikipedia
 ghost-hands run --script steps.json --driver fake  # or --driver chromium
+adb forward tcp:8378 tcp:8378                      # forward the phone's Ghost Hands bridge (USB)
+ghost-hands android-status                         # is MrGhosty's bridge answering? (token via env)
+ghost-hands run --script steps.json --driver android   # drive the real phone, governed
 ghost-hands run --script steps.json --policy policy.json --approve-all
+ghost-hands run --script steps.json --policy-pack strict   # or readonly
 ghost-hands export trail.jsonl -o replay.py        # graduate a trail into a script
 ghost-hands export trail.jsonl --driver fake --pages pages.json -o replay.py
 ghost-hands mcp                                    # MCP server on stdio
+ghost-hands bus-agent --once                       # work one GhostBus task, then exit
+ghost-hands bus-agent --workspace studio           # hosted bus, /w/studio/ (key via GHOSTBUS_KEY)
+ghost-hands bus-demo                               # prove bus mode vs the real GhostBus server
 ```
 
 See `examples/steps.json` and `examples/policy.json` for the file formats.
@@ -169,7 +283,7 @@ See `examples/steps.json` and `examples/policy.json` for the file formats.
 | **Stagehand** | Playwright + AI primitives (act/observe/extract/agent) | Per-step LLM calls | None | Session logs | Action caching | Web (cloud browsers upsell) |
 | **Browser Use** | Own browser agent loop | Full autonomous LLM loop | None | Run history | No | Web |
 | **Jev** | Numbered control list, cheap decision pass | Single cheap pass per step | None (we built Agent Seatbelt for it) | Minimal | No | Web |
-| **Ghost Hands** | **Own CDP stack, zero dependencies — no Playwright, no Selenium under the hood** | Pluggable: scripted, deterministic rules, or any OpenAI-compatible model | **Classify + policy + approval before every action; record-before-execute** | **Full JSONL trail with per-run accounting** | **Yes — trails graduate into Ghost Hands scripts** | Web today; phone (Android via MrGhosty) on the roadmap |
+| **Ghost Hands** | **Own CDP stack, zero dependencies — no Playwright, no Selenium under the hood** | Pluggable: scripted, deterministic rules, or any OpenAI-compatible model | **Classify + policy + approval before every action; record-before-execute** | **Full JSONL trail with per-run accounting** | **Yes — trails graduate into Ghost Hands scripts** | Web (Chromium) + a real Android body (MrGhosty bridge) + a simulated phone body, under a written Body Protocol |
 
 ### Capabilities, feature by feature
 
@@ -200,19 +314,48 @@ says which body each case ran on.
 
 ## Honest status
 
-What is proven, and what is not — as of v0.3.0 (Oct 8, 2026):
+What is proven, and what is not — as of v0.6.0 (Oct 8, 2026):
 
-- **Proven:** the full offline suite (170 pytest tests, 82 bench cases);
+- **Proven:** the full offline suite (299 pytest tests, 88 bench cases);
   the Chromium driver on fixture pages (perceive / type / click / tabs /
   session roundtrip / screenshots / graduated-script execution) and the
   full v0.3 capability set on real Chromium (see the matrix note);
   live runs on example.com and Wikipedia (`ghost-hands bench --live`,
-  2/2); the LLM decider's wire protocol against a local stub endpoint.
+  2/2); the LLM decider's wire protocol against a local stub endpoint;
+  **bus agent mode against the real GhostBus node server** — both the
+  single-workspace relay and a hosted `/w/<id>/` workspace — including
+  an approval granted and an approval denied over the bus mid-run;
+  the Body Protocol conformance scenario on all three in-process
+  bodies; the sim phone's notes flow end to end; **the Android body
+  against the bridge contract** — AndroidDriver's full governed flow
+  (including heal-after-mutation and the consequential delete gate)
+  against a fake bridge speaking the exact wire protocol of the real
+  one, plus the MrGhosty v1.6.0 APK built and signature-verified with
+  the bridge compiled in; **approvals by phone against the same
+  contract** — PhoneApprover's full request/poll flow (approved /
+  denied / expired / timeout / unreachable / 401), payload redaction
+  proven on the wire, a consequential action approved and denied by
+  simulated phone decisions mid-run on both the Android and web
+  bodies, the bus agent's phone channel against the real GhostBus
+  server, and the MrGhosty v1.7.0 APK built and signature-verified
+  with the approval store, receiver, and bridge endpoints compiled
+  in (approval-store logic JVM-tested, 44 checks).
 - **Unproven:** live-model driving quality (bring your own model; how
   well it drives is the model's business, and no benchmark is claimed);
   the Chromium driver against arbitrary third-party websites beyond the
   two live cases above; head-to-head speed vs any other tool (never
-  measured, never claimed).
+  measured, never claimed); bus mode against a *deployed* hosted
+  GhostBus (proven against the real server booted locally, in both
+  shapes); **the Android body and the phone-approval flow on
+  physical hardware — driver + MrGhosty bridge + approval UX are
+  built, but no phone was attached during the v0.5/v0.6 builds;
+  on-device proof waits on Ryan's install of MrGhosty v1.7.0 and his
+  accessibility grant (then: `adb forward tcp:8378 tcp:8378` and
+  `ghost-hands phone-approval-test`).** One real finding
+  from the bus work: GhostBus's file-backed store writes through a
+  single shared `.tmp` file, and heavy concurrent writers can collide
+  on its rename (HTTP 400) — the bus demo uses the server's `:memory:`
+  store for that reason; a file-store fix belongs to GhostBus.
 
 ## Safety posture
 
@@ -226,11 +369,24 @@ What is proven, and what is not — as of v0.3.0 (Oct 8, 2026):
 
 ## Roadmap
 
-- **Android body** — MrGhosty's accessibility service speaking the same
-  action protocol: one hands, phone + web.
-- **GhostBus transport** — hands as a bus agent other agents can task.
-- **Policy packs** — Seatbelt/GhostGuard policy bundles; approvals routed
-  over GhostBus or phone push.
+- [x] **GhostBus transport** — hands as a bus agent other agents can
+  task, approvals routed over the bus (v0.4.0).
+- [x] **Policy packs** — named governor bundles: readonly / standard /
+  strict (v0.4.0). Seatbelt/GhostGuard-flavored packs can follow the
+  same data format.
+- [x] **Body Protocol** — the written driver contract + a simulated
+  phone body proving it (v0.4.0).
+- [x] **Android body** — driver + MrGhosty bridge BUILT (v0.5.0):
+  MrGhosty's accessibility service implements the Body Protocol
+  behind a loopback, pairing-token bridge, and `AndroidDriver` speaks
+  to it; on-device proof pending Ryan's install + accessibility
+  grant. One hands, phone + web.
+- [x] **Approvals by phone push** — DONE (v0.6.0), with one precise
+  caveat about the word "push": approvals route to Ryan's phone
+  through the MrGhosty bridge (notification + in-app decision) when
+  the bridge is reachable; it is a local bridge channel, not a
+  cloud push service. The bridge API has no decision endpoint —
+  decisions happen only on the phone itself.
 
 ## Repository map
 
@@ -240,11 +396,19 @@ What is proven, and what is not — as of v0.3.0 (Oct 8, 2026):
 [CHANGELOG.md](CHANGELOG.md) · [LAUNCH.md](LAUNCH.md)
 
 - `src/ghost_hands/` — the package, one module per layer: `eyes`
-  (perception), `actions`, `governor`, `trail`, `drivers` (FakeDriver +
-  our CDP ChromiumDriver), `deciders`, `runner`, `export`,
-  `mcp_server`, `cli`, `bench`.
-- `tests/` — the pytest suite (170 tests at v0.3.0).
-- Bench — `ghost-hands bench` (offline, 82 cases at v0.3.0) and
+  (perception), `actions`, `governor`, `policies` (policy packs),
+  `trail`, `drivers` (FakeDriver + our CDP ChromiumDriver), `simphone`
+  (the simulated phone body), `android_driver` (the real Android body
+  via the MrGhosty bridge), `phone_approver` (approvals decided on
+  Ryan's phone), `deciders`, `runner`, `export`,
+  `busclient` + `busagent` (GhostBus mode), `mcp_server`, `cli`,
+  `bench`.
+- `docs/BODY_PROTOCOL.md` — the body contract, capability flags,
+  conformance rules, and the Android mapping table.
+- `docs/APPROVALS.md` — the three approval channels (prompt, bus,
+  phone), the no-API-decision rule, and the summary redaction rule.
+- `tests/` — the pytest suite (299 tests at v0.6.0).
+- Bench — `ghost-hands bench` (offline, 88 cases at v0.6.0) and
   `ghost-hands bench --live` (opt-in real-web cases); bench code lives
   in `src/ghost_hands/bench.py`.
 - `examples/` — sample steps and policy files for `ghost-hands run`.

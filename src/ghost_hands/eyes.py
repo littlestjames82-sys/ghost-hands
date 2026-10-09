@@ -80,6 +80,11 @@ class Element:
     label: Optional[str] = None
     frame: Optional[str] = None
     backend_id: Optional[int] = None
+    # v0.5: an opaque body-native target reference (the Android bridge's
+    # child-index path, e.g. "0/2/1"). Bodies that resolve targets by
+    # their own addressing fill this in; web bodies leave it None. It is
+    # recorded in descriptors so a trail shows exactly what was acted on.
+    body_ref: Optional[str] = None
 
     def key(self) -> tuple:
         """Identity used for self-healing matches: tag + role + name."""
@@ -103,6 +108,7 @@ class Element:
             "label",
             "frame",
             "backend_id",
+            "body_ref",
         ):
             val = getattr(self, key)
             if val is not None:
@@ -132,6 +138,7 @@ class Element:
             label=data.get("label"),
             frame=data.get("frame"),
             backend_id=data.get("backend_id"),
+            body_ref=data.get("body_ref"),
         )
 
 

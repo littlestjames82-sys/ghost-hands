@@ -7,7 +7,8 @@ driver-originated events the Runner wires in through the driver's event
 sink: ``dialog`` (a JS dialog appeared; the event records the handling
 decision), ``net`` (a completed network request: method, URL, status,
 type — capped per run), and ``download`` (a browser download completed:
-filename + byte size). The govern and execute events are written *before*
+filename + byte size). v0.4 adds ``approval``: an approval requested or
+decided over an external channel (GhostBus in the bus agent). The govern and execute events are written *before*
 the action runs (record-before-execute), so even a crash leaves an honest
 account of what was about to happen.
 """
@@ -31,6 +32,10 @@ EVENT_TYPES = (
     "dialog",
     "net",
     "download",
+    # v0.4: an approval was requested / decided over an external channel
+    # (GhostBus, phone push). Fields: channel, phase ("request" |
+    # "decision"), classification, run_id, approved (on decisions).
+    "approval",
 )
 
 

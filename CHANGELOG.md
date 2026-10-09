@@ -6,6 +6,148 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [0.6.0] — 2026-10-08
+
+The phone-decides wave: the last roadmap approver lands. Released
+Oct 8, 2026 — this release brings the repo current: 0.4.0 and 0.5.0
+(below) were built and verified but never got their own releases.
+
+- **PhoneApprover** (`phone_approver.py`) — consequential asks route
+  to Ryan's phone through the Ghost Hands bridge in MrGhosty
+  v1.7.0. On an ask it POSTs a redacted approval request and polls
+  for the phone's decision; approved → the action runs, and denied /
+  expired / timeout / unreachable / 401 all mean it never does.
+  Same bridge config as AndroidDriver (loopback-only by default,
+  token from constructor args or `GHOST_HANDS_ANDROID_*` env, never
+  logged or trailed). Trail approval events carry
+  `channel: "phone"`, request + decision phases, and
+  `decided_by: "phone"`.
+- **Redacted summaries, by construction.** Requests carry kind,
+  classification, target descriptor, and current URL/package only;
+  `type` shows the target + character count (never the text — it
+  may be a password), `fill_form` shows field names (never values).
+  The contract tests prove a secret string never appears in the
+  payload the bridge receives.
+- **Bridge protocol addition** — `POST /v1/approvals` (201 /
+  409 duplicate / 400 bad payload) and `GET /v1/approvals/<id>`
+  (pending | approved | denied | expired, `decided_by` /
+  `decided_at` when settled; 404 unknown). **There is intentionally
+  no decision endpoint**: a token holder can create a request but
+  can never approve their own — decisions exist only in MrGhosty's
+  notification actions and Device-tab card.
+- **CLI** — `ghost-hands run --approver phone` works with every
+  driver (the phone can approve web runs too); conflicting approver
+  flags exit 2. New `ghost-hands phone-approval-test` sends one
+  harmless test approval and exits 0 only when the phone approves —
+  the one-command on-device proof.
+- **Bus agent** — `--approval-channel bus|phone` (env
+  `GHOST_HANDS_APPROVAL_CHANNEL`). With `phone`, consequential asks
+  route to the phone; the agent posts a bus comment noting the
+  phone decision and never requests an approval from the bus.
+- **MrGhosty v1.7.0** (companion app) — approval store
+  (JVM-tested core: create/pending/decide-only-while-pending,
+  lazy expiry, duplicate rejection, JSON persistence), the two
+  bridge endpoints, a high-importance "Ghost Hands approvals"
+  notification with Approve/Deny actions, and a Device-tab
+  approvals card. Same signing cert, same 32 permissions.
+- **Verification** — pytest 299/299, offline bench 88/88 (new v6
+  phone-approval case: a consequential delete approved on the
+  simulated phone mid-run, wire payload asserted free of the typed
+  text and the pairing token), live bench 2/2. On-device proof
+  still pending Ryan's install of MrGhosty v1.7.0 — no phone was
+  attached during this build.
+
+## [0.5.0] — 2026-10-08
+
+The real-hands wave: the Android body stops being a spec and a
+simulator and becomes a driver plus a phone-side bridge.
+
+- **AndroidDriver** (`android_driver.py`) — the real Android body.
+  Speaks HTTP/JSON to the Ghost Hands bridge in MrGhosty v1.6.0
+  (loopback `127.0.0.1:8378`, pairing token as
+  `X-Ghost-Hands-Token` from the constructor or
+  `GHOST_HANDS_ANDROID_TOKEN`, never logged or trailed). Non-loopback
+  bridge hosts are refused unless explicitly allowed. Status is
+  validated (protocol 1, app identity, accessibility service
+  connected) with actionable errors for the unreachable / 401 /
+  not-enabled cases.
+- **Bridge protocol** — `GET /v1/status`, `POST /v1/perceive`
+  (accessibility-tree elements with opaque child-index `ref`s),
+  `POST /v1/act` with `{action, target_ref, expected:{tag,role,name}}`;
+  the bridge's 404 "target missing" / 409 "target mismatch" replies
+  feed the Runner's self-healing unchanged. Core actions supported
+  (navigate app/URL, click, type, global-action press, scroll,
+  extract text, real PNG screenshot on API 30+, conditioned waits
+  polled locally); web-only actions fail honestly, never faked.
+- **Element `body_ref`** — an optional opaque body-native target
+  reference, carried through descriptors into the trail.
+- **CLI** — `ghost-hands android-status` (bridge/app/version/
+  foreground/API level, token never printed) and
+  `run --driver android` with `--android-bridge` / `--android-token`;
+  bus-agent accepts `--driver android` (env-configured only).
+- **MrGhosty v1.6.0** (companion app) — the Ghost Hands bridge inside
+  the accessibility service: token generation/rotation in Prefs, a
+  "Ghost Hands bridge" Access-checklist row with the pairing code
+  (app UI only), JVM-tested protocol mapping (54 checks).
+- Verified: 269 pytest (+44: driver units + a fake-bridge end-to-end
+  suite incl. heal-after-mutation), bench 87/87 (+1 Android case),
+  live bench 2/2. On-device proof is pending Ryan's install of
+  MrGhosty v1.6.0 + accessibility grant — no phone was attached
+  during this build.
+
+## [0.4.0] — 2026-10-08
+
+The collaboration wave: the hands join the bus, gain a second body,
+and learn named policies.
+
+- **GhostBus agent mode** — `ghost-hands bus-agent` registers as the
+  agent `ghost-hands` (role: hands) on a GhostBus workspace (stdlib
+  `BusClient`; single-workspace relay or hosted `/w/<id>/`, key from
+  flag/env only, agent token memory-only). It claims tasks addressed
+  to it or tagged `hands` — respecting 15-minute claim leases,
+  `blockedBy`, and the bus's needs-approval gate (gated tasks are never
+  claimed) — runs them through the unchanged Runner/Governor/Trail,
+  posts progress comments, uploads the JSONL trail as a shared bus
+  file, and completes with a structured report.
+- **Approvals over the bus** — a Governor "ask" during a bus run posts
+  `APPROVAL NEEDED: <class> <summary> — reply APPROVE <run-id> or DENY
+  <run-id>` as a task comment + a message to the task creator, then
+  waits on the bus's `/api/wait` long-poll. Deny/timeout denies. Both
+  sides are `approval` trail events (`channel: bus`).
+- **Body Protocol** — `docs/BODY_PROTOCOL.md`: the formal driver
+  contract (perceive → ElementMap, `act` → outcome, capability flags),
+  the shared action vocabulary, conformance rules, and the Android
+  mapping table for MrGhosty's accessibility service (implementation
+  future work; the contract and the rehearsal body are what's here).
+- **SimPhoneDriver** — an in-memory Android-style body: home screen
+  with app icons, Notes (type/save/persist, consequential delete-all),
+  Settings toggles, Back/Home stack, and real PNG screenshots rendered
+  stdlib-only (zlib/struct, 3×5 font). Driven unchanged by the existing
+  Runner/Governor/deciders; conformance scenario passes on all three
+  bodies (Fake, Chromium, SimPhone).
+- **Policy packs** — `ghost_hands.policies`: `readonly` (writes +
+  consequential denied outright), `standard` (the previous default),
+  `strict` (writes ask too, 120s approval leash) — as data: per-class
+  outcomes, approval timeout, allowlist additions. `--policy-pack` on
+  `run`/`bus-agent`; MCP honors `GHOST_HANDS_POLICY`; unknown packs
+  are a loud error.
+- **Trail** — new `approval` event type for external-channel approvals.
+
+Verified on this build: pytest 225 passed; offline bench 86/86; live
+bench 2/2 (example.com, Wikipedia — one transient egress failure was
+observed and passed on re-run, as in the 0.3 round). Bus mode proven
+end to end against the **real** GhostBus node server in both shapes
+(single-workspace relay and hosted `/w/<id>/`), including an approval
+granted and an approval denied over the bus mid-run. Wheel 104,118 B,
+sdist 413,246 B. **Not published** — local build; PyPI/GitHub still
+serve 0.3.0 until a release is cut.
+
+One cross-project finding from the bus work: GhostBus's file-backed
+store writes through a single shared `.tmp` file whose rename can
+collide under heavy concurrent writers (HTTP 400 ENOENT); the bus
+demo and tests use the server's `:memory:` store. The fix belongs to
+GhostBus.
+
 ## [0.3.0] — 2026-10-08
 
 The capabilities wave: Playwright-class breadth on our own CDP stack,

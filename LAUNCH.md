@@ -1,10 +1,20 @@
 # Ghost Hands — Launch Package
 
-> **STATUS: DRAFT — STAGED LOCALLY ONLY.**
-> Nothing in this file has been published, posted, pushed, or deployed.
-> Every step below runs only on Ryan's explicit go. All copy is DRAFT.
-> Numbers cited are the verified v0.3.0 numbers (see "Honest-claims
-> checklist" at the bottom) — do not inflate them anywhere.
+> **STATUS: v0.6.0 PUBLISHED (Oct 8, 2026).**
+> The 0.3.0 launch below was executed — repo, PyPI (trusted
+> publishing), and Pages are live. **v0.6.0 is now the published
+> release** (tag `v0.6.0`, GitHub release, PyPI via the release
+> workflow): it brings the repo current through the 0.4.0 wave
+> (GhostBus agent mode, Body Protocol + sim phone body, policy
+> packs — pytest 225), the 0.5.0 wave (real Android body:
+> AndroidDriver + MrGhosty bridge — pytest 269), and the 0.6.0 wave
+> (PhoneApprover: approvals decided on Ryan's phone — pytest
+> **299 passed**, offline bench **88/88**, live bench **2/2**,
+> wheel 123,802 B / sdist 454,640 B). Honest limit, unchanged:
+> on-device proof is still pending Ryan's install of MrGhosty
+> v1.7.0 — no phone was attached during these builds.
+> The announcement drafts below are still DRAFT and unsent; each
+> channel remains its own approval from Ryan.
 
 ---
 
@@ -84,9 +94,15 @@ wanders. Ghost Hands answers for every move.*
 > trail, structured extract, dialog policy, PDF, viewport presets,
 > richer input (hover/drag/chords/raw coordinates), and wait-for
 > conditions — every one classified and trailed like the rest.
-> It's verified by a 170-test pytest suite and an 82-case bench,
+> v0.4.0 (built, not yet released) adds a GhostBus agent mode — the
+> hands register on our agent bus, claim tasked work, and route the
+> approval itself over the bus — plus a written Body Protocol with a
+> simulated phone body, and named policy packs (readonly / standard /
+> strict).
+> It's verified by a 225-test pytest suite and an 86-case bench,
 > including live runs against example.com and a real Wikipedia search
-> driven end-to-end by the deterministic decider.
+> driven end-to-end by the deterministic decider, and bus-mode runs
+> against the real GhostBus server.
 >
 > The honest limits: the LLM decider's protocol is proven against a stub;
 > how well any given live model drives it is that model's business.
@@ -130,9 +146,10 @@ wanders. Ghost Hands answers for every move.*
 > - Plus a stdlib MCP server (`hands_perceive` / `hands_act` / `hands_run`
 >   / `hands_trail`) — Playwright MCP's surface, with the governor attached.
 >
-> Verified locally: 170 pytest tests, 82 bench cases, plus live cases
+> Verified locally: 225 pytest tests, 86 bench cases, plus live cases
 > (example.com link-follow; a real Wikipedia search for "Oakdale,
-> Tennessee" driven end-to-end by the rules decider). MIT licensed.
+> Tennessee" driven end-to-end by the rules decider) and bus-agent runs
+> against the real GhostBus server. MIT licensed.
 > Feedback on the classification model especially welcome.
 
 ## r/opensource post (DRAFT)
@@ -148,8 +165,8 @@ wanders. Ghost Hands answers for every move.*
 > provenance trail before it runs, and can graduate a finished run into a
 > deterministic script that needs no model. The browser automation layer
 > is our own — a zero-dependency stdlib CDP client — because we didn't
-> want to ship someone else's stack as our product. MIT. Links + a
-> 82-case bench and 170 tests in the repo; live example (real Wikipedia
+> want to ship someone else's stack as our product. MIT. Links + an
+> 86-case bench and 225 tests in the repo; live example (real Wikipedia
 > search, governed) in the README.
 
 ---
@@ -187,7 +204,7 @@ wanders. Ghost Hands answers for every move.*
 1. **Cold open (the problem):** on camera — an ungoverned agent (any
    competitor) one prompt away from clicking "Place order". Freeze frame:
    "Would you let your agent do that unsupervised?"
-2. **The bench moment:** run `ghost-hands bench` live on screen — 82/82,
+2. **The bench moment:** run `ghost-hands bench` live on screen — 86/86,
    call out the money case: "checkout blocked without approval."
 3. **Show the trail:** open a trail file; walk one step: perceive →
    decide → govern → execute → result. "Receipts for every move."
@@ -228,11 +245,17 @@ wanders. Ghost Hands answers for every move.*
 
 ## Publish steps (run ONLY on Ryan's explicit go, in order)
 
-1. **Final local verification:** `pytest -q` (expect 170 passed),
-   `ghost-hands bench` (expect 82/82), `ghost-hands bench --live`
-   (expect 2/2), `python -m build` (0.3.0 wheel + sdist), clean-venv
-   install + `ghost-hands demo` + MCP smoke. Record the numbers; update
-   README/this file if they moved.
+1. **Final local verification:** `pytest -q` (expect 225 passed),
+   `ghost-hands bench` (expect 86/86), `ghost-hands bench --live`
+   (expect 2/2), `python -m build` (current-version wheel + sdist),
+   clean-venv install + `ghost-hands demo` + MCP smoke. Record the
+   numbers; update README/this file if they moved.
+   *(For 0.3.0 this whole sequence ran on Oct 8, 2026 and steps 2–5
+   below were executed — repo, PyPI trusted publishing, and Pages are
+   live, and future releases auto-publish from a GitHub release. For a
+   0.4.0 release the remaining steps are: tag `v0.4.0`, cut the GitHub
+   release with the CHANGELOG notes, verify PyPI + the clean-venv
+   install, then announce.)*
 2. **Create the GitHub repo** `littlestjames82-sys/ghost-hands` (public,
    MIT) via the GitHub API with the stored connector (same route used for
    agent-seatbelt / ghostbus): push the tree at `~/workspace/ghost-hands/`
@@ -267,6 +290,38 @@ wanders. Ghost Hands answers for every move.*
 ---
 
 ## Honest-claims checklist (verified Oct 8, 2026 — re-verify on launch day)
+
+**v0.4.0 additions (verified Oct 8, 2026, local build — NOT published):**
+
+- [x] pytest: **225 passed** (v0.4.0 tree); offline bench **86/86**;
+      live bench **2/2** on re-run (one transient egress failure
+      observed first, same shape as the 0.3 note below).
+- [x] Bus agent mode E2E against the **real** GhostBus node server,
+      both shapes: single-workspace relay (`bus-demo`: fake-web task +
+      Chromium fixture task, the fixture order's consequential submit
+      approved by a second client over the bus mid-run; trail uploaded
+      as a shared file; structured completion) and hosted `/w/<id>/`
+      workspace (full task cycle via `--workspace`-style client config;
+      wrong key refused with 401). Approval DENY and approval timeout
+      paths covered by tests; needs-approval gate and `blockedBy`
+      respected (tested).
+- [x] Body Protocol conformance on three bodies (Fake / Chromium /
+      SimPhone): one abstract scenario; destructive step denied with
+      no approver, executed with one; trail shapes identical in order.
+- [x] Policy packs: readonly denies a write (trailed, never executed);
+      strict asks for writes; standard is byte-for-byte the old default
+      policy; unknown pack raises a loud error. MCP honors
+      `GHOST_HANDS_POLICY`.
+- [x] Dist sizes (0.4.0): wheel **104,118 B**, sdist **413,246 B**.
+- [ ] Android body: protocol + simulator ONLY. Never claim a working
+      phone driver until the MrGhosty accessibility driver exists.
+- [ ] Bus mode vs a *deployed* hosted GhostBus: unproven (local real
+      server only). GhostBus file-store concurrency: the file-backed
+      store's shared-`.tmp` rename can collide under heavy concurrent
+      writers (observed HTTP 400) — demo/tests use `:memory:`; the fix
+      is GhostBus's to make.
+
+**v0.3.0 baseline (verified Oct 8, 2026):**
 
 - [x] pytest: **170 passed** (v0.3.0 tree).
 - [x] Bench (offline): **82/82 passed**, including live-Chrome fixture
