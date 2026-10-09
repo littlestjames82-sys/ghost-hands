@@ -9,7 +9,10 @@ a launcher home, a Notes app (list → editor → saved note, plus a
 consequential "Delete all notes"), and a Settings toggles app.
 
 Element refs are child-index paths ("0/0", "0/1", ...) exactly like
-the real bridge produces from its tree walk.
+the real bridge produces from its tree walk. Elements carry distinct
+bounds; the Settings screen adds a Volume slider and a Tap counter,
+and the v0.7 gestures (double_click / drag / click_at) are recorded
+on the state as ``gestures`` (raw act bodies in ``act_payloads``).
 
 Approvals mirror the real bridge's structural rule: the wire can
 CREATE an approval and READ its status, but there is NO decision
@@ -55,6 +58,10 @@ class FakeAndroidState:
         self.draft = ""
         self.editing = None
         self.toggles = {"Wi-Fi": True, "Bluetooth": False}
+        self.volume = 30  # Settings slider value (0..100)
+        self.tap_count = 0  # Settings "Tap counter" value
+        self.gestures: list = []  # double_click / drag / click_at records
+        self.act_payloads: list = []  # raw /v1/act bodies, for wire asserts
         self.banner = False  # test hook: extra element atop the notes list
         self.foreground_package = PACKAGES["home"]
         self.seen_tokens: list = []
@@ -118,8 +125,14 @@ class FakeAndroidState:
         items: list[dict] = []
         if screen == "home":
             items = [
-                self._el("Button", "app_icon", "Notes", "app:notes"),
-                self._el("Button", "app_icon", "Settings", "app:settings"),
+                self._el(
+                    "Button", "app_icon", "Notes", "app:notes",
+                    bounds=[0, 100, 540, 340],
+                ),
+                self._el(
+                    "Button", "app_icon", "Settings", "app:settings",
+                    bounds=[540, 100, 1080, 340],
+                ),
             ]
         elif screen == "notes":
             if self.banner:
@@ -148,18 +161,43 @@ class FakeAndroidState:
                         checked=on,
                     )
                 )
+            items.append(
+                self._el(
+                    "SeekBar", "slider", "Volume", "slider:volume",
+                    value=str(self.volume),
+                )
+            )
+            items.append(
+                self._el(
+                    "Button", "button", "Tap counter", "counter:tap",
+                    value=str(self.tap_count),
+                )
+            )
+        # Distinct stacked-row bounds by default: row i occupies
+        # [0, 100+i*140, 1080, 100+i*140+120]. Home icons carry their
+        # own side-by-side bounds (set above); the Settings slider is
+        # a centred track on its own row.
+        for i, item in enumerate(items):
+            if screen != "home":
+                top = 100 + i * 140
+                if item["id"].rsplit("/", 1)[-1] == "slider:volume":
+                    item["bounds"] = [270, top, 810, top + 120]
+                else:
+                    item["bounds"] = [0, top, 1080, top + 120]
         # Assign child-index refs in document order, like the real walk.
         for i, item in enumerate(items):
             item["ref"] = f"0/{i}"
         return items
 
-    def _el(self, tag, role, name, view_id, value=None, checked=None) -> dict:
+    def _el(
+        self, tag, role, name, view_id, value=None, checked=None, bounds=None
+    ) -> dict:
         el = {
             "tag": tag,
             "role": role,
             "name": name,
             "id": f"{PACKAGES[self.screen]}:id/{view_id}",
-            "bounds": [0, 100, 1080, 220],
+            "bounds": list(bounds) if bounds is not None else [0, 100, 1080, 220],
             "attrs": {
                 "package": PACKAGES[self.screen],
                 "view_id": f"{PACKAGES[self.screen]}:id/{view_id}",
@@ -222,7 +260,14 @@ class FakeAndroidState:
             name = vid.split(":", 1)[1]
             self.toggles[name] = not self.toggles[name]
             return f'tapped toggle "{name}" -> {"on" if self.toggles[name] else "off"}'
+        if vid == "counter:tap":
+            self.tap_count += 1
+            return f'tapped "Tap counter" -> count {self.tap_count}'
         return f'tapped "{el["name"]}" (no effect)'
+
+    # Alias matching the task vocabulary: the click effect a click_at
+    # hit reuses.
+    _apply_click = apply_tap
 
 
 def make_bridge(state: FakeAndroidState | None = None):
@@ -350,37 +395,41 @@ def make_bridge(state: FakeAndroidState | None = None):
 
         def _act(self):
             body = self._body()
+            state.act_payloads.append(body)
             action = body.get("action") or {}
             kind = action.get("kind")
             ref = body.get("target_ref")
             expected = body.get("expected")
 
-            def resolve_target():
-                if ref is None:
+            def resolve_ref(which_ref, which_expected):
+                if which_ref is None:
                     return None, None
-                el = state.resolve(ref)
+                el = state.resolve(which_ref)
                 if el is None:
                     self._send(
                         404,
-                        {"error": f"target missing: ref {ref} no longer "
+                        {"error": f"target missing: ref {which_ref} no longer "
                                   "resolves on the current screen"},
                     )
                     return None, "sent"
-                if expected:
+                if which_expected:
                     key = (el["tag"], el["role"], el["name"])
                     want = (
-                        expected.get("tag"),
-                        expected.get("role"),
-                        expected.get("name"),
+                        which_expected.get("tag"),
+                        which_expected.get("role"),
+                        which_expected.get("name"),
                     )
                     if key != want:
                         self._send(
                             409,
-                            {"error": f"target mismatch: ref {ref} was "
+                            {"error": f"target mismatch: ref {which_ref} was "
                                       f"{want}, now {key}"},
                         )
                         return None, "sent"
                 return el, None
+
+            def resolve_target():
+                return resolve_ref(ref, expected)
 
             if kind == "navigate":
                 url = action.get("url") or ""
@@ -417,6 +466,94 @@ def make_bridge(state: FakeAndroidState | None = None):
                 if el is None:
                     return self._send(400, {"error": "click requires a target"})
                 return self._send(200, {"ok": True, "result": state.apply_tap(el)})
+            if kind == "double_click":
+                el, sent = resolve_target()
+                if sent:
+                    return
+                if el is None:
+                    return self._send(
+                        400, {"error": "double_click requires a target"}
+                    )
+                state.gestures.append(
+                    {"kind": "double_click", "from_ref": ref,
+                     "to_ref": None, "x": None, "y": None}
+                )
+                vid = el["id"].rsplit("/", 1)[-1]
+                if vid == "counter:tap":
+                    state.tap_count += 2
+                    return self._send(
+                        200,
+                        {"ok": True,
+                         "result": f"double-tapped {el['name']} -> "
+                                   f"count {state.tap_count}"},
+                    )
+                return self._send(
+                    200,
+                    {"ok": True, "result": f"double-tapped {el['name']}"},
+                )
+            if kind == "drag":
+                el, sent = resolve_target()
+                if sent:
+                    return
+                if el is None:
+                    return self._send(400, {"error": "drag requires a target"})
+                to_ref = body.get("to_ref")
+                if to_ref is None:
+                    return self._send(
+                        400, {"error": "drag requires a destination (to_ref)"}
+                    )
+                dest, sent = resolve_ref(to_ref, body.get("to_expected"))
+                if sent:
+                    return
+                state.gestures.append(
+                    {"kind": "drag", "from_ref": ref, "to_ref": to_ref,
+                     "x": None, "y": None}
+                )
+                vid = el["id"].rsplit("/", 1)[-1]
+                if vid == "slider:volume":
+                    left, _top, right, _bottom = el["bounds"]
+                    width = right - left
+                    dest_center_x = (dest["bounds"][0] + dest["bounds"][2]) / 2
+                    volume = round(100 * (dest_center_x - left) / width)
+                    state.volume = max(0, min(100, volume))
+                    return self._send(
+                        200,
+                        {"ok": True,
+                         "result": f'dragged "Volume" slider -> '
+                                   f"volume {state.volume}"},
+                    )
+                return self._send(
+                    200,
+                    {"ok": True,
+                     "result": f'dragged "{el["name"]}" onto '
+                               f'"{dest["name"]}"'},
+                )
+            if kind == "click_at":
+                x = action.get("x")
+                y = action.get("y")
+                if x is None or y is None:
+                    return self._send(
+                        400, {"error": "click_at requires x and y"}
+                    )
+                hit = None
+                for candidate in state.elements():
+                    bounds = candidate["bounds"]
+                    if bounds[0] <= x <= bounds[2] and bounds[1] <= y <= bounds[3]:
+                        hit = candidate
+                        break
+                if hit is None:
+                    return self._send(
+                        400,
+                        {"error": f"click_at ({x}, {y}) hit nothing on "
+                                  "the current screen"},
+                    )
+                state.gestures.append(
+                    {"kind": "click_at", "from_ref": hit["ref"],
+                     "to_ref": None, "x": x, "y": y}
+                )
+                return self._send(
+                    200, {"ok": True, "result": state.apply_tap(hit)}
+                )
             if kind == "type":
                 el, sent = resolve_target()
                 if sent:

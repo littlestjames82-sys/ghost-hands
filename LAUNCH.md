@@ -316,10 +316,18 @@ wanders. Ghost Hands answers for every move.*
 - [ ] Android body: protocol + simulator ONLY. Never claim a working
       phone driver until the MrGhosty accessibility driver exists.
 - [ ] Bus mode vs a *deployed* hosted GhostBus: unproven (local real
-      server only). GhostBus file-store concurrency: the file-backed
+      server only). ~~GhostBus file-store concurrency: the file-backed
       store's shared-`.tmp` rename can collide under heavy concurrent
       writers (observed HTTP 400) — demo/tests use `:memory:`; the fix
-      is GhostBus's to make.
+      is GhostBus's to make.~~ **RESOLVED (v0.7.0):** GhostBus fixed
+      it in 0.4.1 (unique temp per save + serialized saves) with a
+      permanent regression test in its suite since 0.5.0 (44/44 +
+      6/6, re-verified Oct 8, 2026); Ghost Hands v0.7 proves it from
+      its own side — bus demo + parallel agent/poller barrage
+      against a file-backed store, zero 400s. (Narrower design note:
+      GhostBus shared stores re-read state per operation, so many
+      *simultaneous* writers can still lose updates silently; the
+      agent+poller workload is unaffected — measured.)
 
 **v0.3.0 baseline (verified Oct 8, 2026):**
 

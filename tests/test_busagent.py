@@ -418,6 +418,76 @@ def test_bus_demo_end_to_end():
     assert evidence["approval_events"][-1]["approved"] is True
 
 
+def test_file_store_barrage_no_races(tmp_path):
+    """v0.7: the GhostBus FileStore race (fixed upstream in GhostBus
+    0.4.1, regression-tested there since 0.5.0) stays fixed under a
+    Ghost Hands-side parallel agent+poller barrage against one
+    file-backed store: the agent writes results + messages while a
+    poller continuously reads — zero errors (the pre-fix symptom was
+    HTTP 400 ENOENT on rename), the final write is intact, the store
+    JSON parses, and no orphan temp files remain.
+
+    Scope note (measured Oct 8, 2026): this is the workload Ghost
+    Hands actually generates — one agent writing, others polling.
+    A free-for-all of 4+ simultaneous writers is a different story:
+    GhostBus core reloads shared-store state per operation
+    (read-modify-write by design, for cross-process sharing), so
+    overlapping writes can still lose updates silently even though
+    the .tmp collision itself is gone. Characterized in the v0.7.0
+    build report; not asserted here because it is not the guarantee
+    GhostBus makes."""
+    from ghost_hands.busclient import BusError
+
+    store_dir = tmp_path / "store"
+    store_dir.mkdir()
+    proc, base = boot_ghostbus_server(
+        GHOSTBUS_DIR, store_dir=store_dir, key=KEY
+    )
+    errors: list[str] = []
+    try:
+        agent = make_client(base, "barrage-agent")
+        poller = make_client(base, "barrage-poller")
+        stop = threading.Event()
+
+        def poll() -> None:
+            while not stop.is_set():
+                try:
+                    poller.list_files()
+                    poller.inbox()
+                except BusError as exc:
+                    errors.append(f"poller: {exc} (status {exc.status})")
+                time.sleep(0.01)
+
+        thread = threading.Thread(target=poll)
+        thread.start()
+        try:
+            for round_no in range(30):
+                agent.put_file(
+                    "barrage/result.txt", f"round {round_no}"
+                )
+                if round_no % 6 == 0:
+                    agent.send_message(
+                        "barrage-poller", f"progress {round_no}"
+                    )
+        finally:
+            stop.set()
+            thread.join(timeout=10)
+        assert not errors, errors
+        got = poller.get_file("barrage/result.txt")
+        assert got["text"] == "round 29", got
+    finally:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except Exception:
+            proc.kill()
+    store_file = store_dir / "ghostbus-data.json"
+    assert store_file.is_file()
+    json.loads(store_file.read_text(encoding="utf-8"))  # parses clean
+    orphans = [p.name for p in store_dir.iterdir() if ".tmp" in p.name]
+    assert orphans == [], orphans
+
+
 # ---------------------------------------------------------------------------
 # v0.6: the phone approval channel — the bus carries the work, the
 # phone carries the conscience. No approval is requested FROM the bus.

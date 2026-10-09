@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ghost Hands — trail audit report</title>
+<style>
+:root { color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #141416; color: #e8e8ec;
+  font: 15px/1.55 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 880px; margin: 0 auto; padding: 32px 20px 64px; }
+header { border-bottom: 3px solid #6716f3; padding-bottom: 18px; margin-bottom: 24px; }
+h1 { margin: 0 0 4px; font-size: 28px; letter-spacing: .2px; }
+h1 .ghost { color: #a678ff; }
+.sub { color: #a9a9b3; margin: 2px 0; }
+.sub b { color: #e8e8ec; }
+.stop { display: inline-block; margin-top: 10px; padding: 3px 12px; border-radius: 999px;
+  background: #26232e; border: 1px solid #6716f3; color: #d9c8ff; font-size: 13px; }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px; margin: 0 0 28px; }
+.card { background: #1d1d21; border: 1px solid #2e2e35; border-radius: 10px; padding: 12px 14px; }
+.card .n { font-size: 22px; font-weight: 700; color: #fff; }
+.card .k { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #a9a9b3; }
+.step { background: #1a1a1e; border: 1px solid #2a2a31; border-left: 4px solid #6716f3;
+  border-radius: 8px; padding: 14px 18px; margin: 0 0 14px; }
+.step h3 { margin: 0 0 8px; font-size: 15px; color: #cdb9ff; }
+.step h3 .clock { color: #8b8b96; font-weight: 400; font-size: 13px; }
+.row { margin: 4px 0; }
+.row .tag { display: inline-block; min-width: 86px; color: #8b8b96; font-size: 12px;
+  text-transform: uppercase; letter-spacing: .06em; }
+.chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 12px;
+  font-weight: 600; margin-right: 6px; }
+.chip.readonly { background: #23301f; color: #a5d68f; border: 1px solid #3d5a2e; }
+.chip.write { background: #33291a; color: #f0c674; border: 1px solid #6b5222; }
+.chip.consequential { background: #3a1f33; color: #ff9de2; border: 1px solid #7a2d63; }
+.chip.unknown { background: #26262c; color: #a9a9b3; border: 1px solid #3a3a44; }
+.verdict { font-weight: 600; }
+.verdict.allow { color: #a5d68f; }
+.verdict.deny { color: #ff8f8f; }
+.verdict.ask { color: #f0c674; }
+.reason { color: #a9a9b3; font-size: 13px; }
+.result-ok { color: #cfcfda; }
+.result-err { color: #ff8f8f; }
+.special { margin: 6px 0 6px 86px; padding: 8px 12px; border-radius: 6px;
+  background: #211d2b; border: 1px solid #38295e; font-size: 13.5px; }
+.special .tag { min-width: 0; margin-right: 8px; color: #cdb9ff; }
+details { margin: 6px 0 6px 86px; }
+details summary { cursor: pointer; color: #a678ff; font-size: 13px; }
+details pre { background: #101013; border: 1px solid #2a2a31; border-radius: 6px;
+  padding: 10px 12px; overflow-x: auto; font-size: 12.5px; color: #cfcfda;
+  white-space: pre-wrap; word-break: break-word; }
+footer { margin-top: 36px; padding-top: 14px; border-top: 1px solid #2a2a31;
+  color: #8b8b96; font-size: 13px; }
+.mono { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+</style></head><body><div class="wrap">
+<header>
+<h1><span class="ghost">👻</span> Ghost Hands — trail audit report</h1>
+<p class="sub">Goal: <b>Buy the blue mug</b></p>
+<p class="sub">Body: <b>web (Chromium / fake web)</b></p>
+<p class="sub">Started at: <b class="mono">https://shop.test/</b></p>
+<p class="sub">2023-11-14 22:13:20 → 2023-11-14 22:13:40 (20.0 s)</p>
+<span class="stop">stopped: denied — approval denied by operator</span>
+</header>
+<div class="cards">
+<div class="card"><div class="n">3</div><div class="k">steps executed</div></div>
+<div class="card"><div class="n">20.0 s</div><div class="k">wall duration</div></div>
+<div class="card"><div class="n">3,060</div><div class="k">perception chars</div></div>
+<div class="card"><div class="n">~765</div><div class="k">est. tokens (chars/4)</div></div>
+<div class="card"><div class="n">consequential: 2, readonly: 1, write: 1</div><div class="k">actions by class</div></div>
+<div class="card"><div class="n">1✓ / 1✗</div><div class="k">approvals asked: 2</div></div>
+<div class="card"><div class="n">1</div><div class="k">self-heals</div></div>
+<div class="card"><div class="n">1 / 1 / 1</div><div class="k">downloads / dialogs / net</div></div>
+</div>
+<section class="step">
+<h3>Step 0 <span class="clock">22:13:20</span></h3>
+</section>
+<section class="step">
+<h3>Step 1 <span class="clock">22:13:21</span></h3>
+<div class="row"><span class="tag">Perceived</span>https://shop.test/ — 6 elements, 1200 map chars</div><details><summary>perception record</summary><pre>url: https://shop.test/
+title: Shop
+elements: 6
+map_chars: 1200
+signature: sig1</pre></details>
+<div class="row"><span class="tag">Decision</span>click [2] &quot;Mugs&quot;</div>
+<div class="row"><span class="tag">Governor</span><span class="chip readonly">readonly</span><span class="verdict allow">allowed</span> <span class="reason">readonly actions are allowed</span></div>
+<div class="row"><span class="tag">Executed</span>click [2] &quot;Mugs&quot;</div>
+<div class="row"><span class="tag">Result</span><span class="result-ok">✓ navigated to https://shop.test/mugs</span></div>
+<details><summary>network — 1 event(s)</summary><pre>GET https://shop.test/mugs → 200 (Document)</pre></details>
+</section>
+<section class="step">
+<h3>Step 2 <span class="clock">22:13:23</span></h3>
+<div class="row"><span class="tag">Perceived</span>https://shop.test/login — 4 elements, 640 map chars</div><details><summary>perception record</summary><pre>url: https://shop.test/login
+title: Sign in
+elements: 4
+map_chars: 640
+signature: sig2</pre></details>
+<div class="row"><span class="tag">Decision</span>type &quot;•••• (13 chars)&quot; into [9] &quot;Password&quot;</div>
+<div class="row"><span class="tag">Governor</span><span class="chip write">write</span><span class="verdict allow">allowed</span> <span class="reason">write allowed</span></div>
+<div class="row"><span class="tag">Executed</span>type &quot;•••• (13 chars)&quot; into [3] &quot;Password&quot; <span class="reason">[after heal]</span></div>
+<div class="row"><span class="tag">Result</span><span class="result-ok">✓ typed 13 chars into [3]</span></div>
+<div class="special"><span class="tag">↻ heal</span>target [9] moved; re-found as [3] by descriptor (found) — trigger: target missing</div>
+</section>
+<section class="step">
+<h3>Step 3 <span class="clock">22:13:25</span></h3>
+<div class="row"><span class="tag">Perceived</span>https://shop.test/cart — 5 elements, 800 map chars</div><details><summary>perception record</summary><pre>url: https://shop.test/cart
+title: Cart
+elements: 5
+map_chars: 800
+signature: sig3</pre></details>
+<div class="row"><span class="tag">Decision</span>click [4] &quot;Place order&quot;</div>
+<div class="row"><span class="tag">Governor</span><span class="chip consequential">consequential</span><span class="verdict ask">ask → approved</span> <span class="reason">via phone</span> <span class="reason">consequential actions require approval</span></div>
+<div class="row"><span class="tag">Executed</span>click [4] &quot;Place order&quot;</div>
+<div class="row"><span class="tag">Result</span><span class="result-ok">✓ order placed</span></div>
+<div class="special"><span class="tag">✋ approval asked</span>via phone: click [4] &#x27;Place order&#x27; — Cart (shop.test)</div>
+<div class="special"><span class="tag">✋ approval</span><b>APPROVED</b> via phone (decided by phone)</div>
+<div class="special"><span class="tag">dialog</span>alert dialog “Thanks for your order” → <b>accepted</b> (policy: accept)</div>
+<div class="special"><span class="tag">⬇ download</span>receipt.pdf — 2048 bytes (completed)</div>
+</section>
+<section class="step">
+<h3>Step 4 <span class="clock">22:13:32</span></h3>
+<div class="row"><span class="tag">Perceived</span>https://shop.test/account — 3 elements, 420 map chars</div><details><summary>perception record</summary><pre>url: https://shop.test/account
+title: Account
+elements: 3
+map_chars: 420
+signature: sig4</pre></details>
+<div class="row"><span class="tag">Decision</span>click [1]</div>
+<div class="row"><span class="tag">Governor</span><span class="chip consequential">consequential</span><span class="verdict deny">ask → denied</span> <span class="reason">via bus</span> <span class="reason">consequential actions require approval</span></div>
+<div class="special"><span class="tag">✋ approval asked</span>via bus: </div>
+<div class="special"><span class="tag">✋ approval</span><b>DENIED</b> via bus (decided by operator)</div>
+<div class="row"><span class="tag">Stop</span><b>denied</b> — approval denied by operator</div>
+</section>
+<footer>Generated by Ghost Hands report — the trail is the record. 28 events rendered. 1 unreadable line(s) were skipped while parsing.</footer>
+</div></body></html>

@@ -155,6 +155,40 @@ bench case on real Chromium (local fixtures) unless noted:
   v1.7.0 bridge; decisions exist only on the phone's own UI, the API
   has no decision endpoint; on-device proof pending Ryan's install.)
 - Live-model driving evaluation (bring a key; measure a named model honestly).
+  **BUILT in v0.7.0** — `ghost-hands eval`: 8 graded tasks (search,
+  form+submit, table extraction, multi-hop fact, trap avoidance,
+  heal recovery, login trail audit, impossible-goal honest stop),
+  4 on real Chromium; stub model server (harness proof, labeled)
+  8/8, RuleDecider baseline 3/8, real models via the environment.
+  The same wave added Android gestures (MrGhosty v1.8.0) and
+  closed the GhostBus file-store loop (fixed upstream in GhostBus
+  0.4.1; file-store demo + barrage proven from this side).
+- Receipts + reach. **BUILT in v0.8.0** — `ghost-hands report`
+  renders a trail JSONL as one self-contained HTML audit report
+  (escaped throughout, password-typed values masked, corrupt lines
+  counted not fatal); the MCP server reaches parity (body selected
+  by GHOST_HANDS_DRIVER across fake/chromium/simphone/android,
+  GHOST_HANDS_APPROVER=phone routes asks to the phone, replies name
+  the deciding channel); and the `seatbelt` policy pack lands —
+  standard's posture plus Policy.deny_patterns denying
+  prompt-injection-shaped targets outright at the Governor.
+  pytest 365/365, bench 93/93. Not published.
+- Field kit. **BUILT in v0.9.0** — `ghost-hands doctor` diagnoses
+  the whole stack in one pass (runtime, Chromium via the driver's
+  own finder, the four packs, model-env key presence, GhostBus
+  when configured with its workspace shape, the phone bridge when
+  configured with version/accessibility/protocol checks, adb),
+  PASS/WARN/FAIL rows with plain-language fixes, `--json` for
+  tooling, exit 1 iff anything FAILs, probes timeout-bounded,
+  secrets never printed. `ghost-hands phone-proof` guides the
+  on-device proof through five checked steps (configuration →
+  exit 2 when unconfigured; the adb forward; bridge status; the
+  harmless test approval — denied/expired/timeout exit 3 with
+  instructions; the proven summary + next commands), scriptable
+  via `--yes`. Both proven against the fake bridge + a locally
+  booted real GhostBus; the physical-phone run still waits on
+  Ryan — these are the tools that run it with him.
+  pytest 395/395, bench 95/95. Not published.
 
 ## Rules
 - No stealth/undetectability features. The hands identify honestly; governance is

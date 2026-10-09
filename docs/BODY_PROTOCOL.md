@@ -164,11 +164,17 @@ The mapping, as implemented:
 | `screenshot` | `AccessibilityService.takeScreenshot()` (API 30+), PNG-encoded, base64 on the wire; honest error below API 30. |
 | `navigate` | Launch intent for `app://<package>` (or `android://<package>`), `ACTION_VIEW` for http/https; other schemes honestly refused. |
 | `wait` / `wait_for` | Timed locally by the driver; conditions poll bridge perception until they hold or the timeout expires (honest error). |
+| `double_click` (v1.8.0) | Two `dispatchGesture` taps at the target's bounds center in one gesture description (second stroke starts ~180ms after the first, ~120ms between tap starts' ends), after the same ref resolution + expected verification as `click`. The async gesture callback is awaited on a bounded latch (2s): completed → result; cancelled or timed out → honest HTTP 400. |
+| `drag` (v1.8.0) | The act body carries `to_ref` + `to_expected` for the destination; BOTH ends are resolved and verified (same 404/409 shapes). One `dispatchGesture` stroke from the source's bounds center to the destination's bounds center over ~300ms, awaited on the bounded latch; cancelled/timed out → honest HTTP 400. |
+| `click_at` (v1.8.0) | Coordinates come from the action (`x`, `y`); no target is required. The bridge reads the active window root's screen bounds and refuses out-of-bounds points honestly (HTTP 400 naming the point and the bounds); in-bounds taps dispatch a single gesture tap, awaited like the others. |
 
-Web-shaped actions (`select`, `hover`, `double_click`, `right_click`,
-`drag`, `click_at`, `fill_form`, `set_file`, `download`, `pdf`,
-`set_viewport`) are refused honestly by the driver — the phone body
-has no honest equivalent for them.
+Web-shaped actions (`select`, `hover`, `right_click`, `fill_form`,
+`set_file`, `download`, `pdf`, `set_viewport`) are refused honestly
+by the driver — the phone body has no honest equivalent for them.
+(`double_click`, `drag`, and `click_at` joined the implemented set
+in MrGhosty v1.8.0; the *simulated* phone body — SimPhoneDriver —
+does not implement them and still refuses them honestly: no fake
+parity.)
 
 Android realities the contract already anticipates: node trees mutate
 constantly (hence heal-by-key, §2), some surfaces are canvas-drawn

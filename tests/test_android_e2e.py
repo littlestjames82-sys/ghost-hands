@@ -146,6 +146,109 @@ def test_android_settings_toggle(bridge):
     assert state.toggles["Bluetooth"] is True
 
 
+# -- gestures (v0.7), straight through AndroidDriver + the fake bridge ------
+
+
+def _open_settings(driver):
+    m = driver.perceive()
+    settings = m.get(2)
+    assert settings.name == "Settings"
+    driver.act(A.click(settings.number), settings)
+    return driver.perceive()
+
+
+def _bounds_center(element):
+    left, top, right, bottom = (
+        int(part) for part in element.attrs["bounds"].split(",")
+    )
+    return (left + right) / 2, (top + bottom) / 2
+
+
+def test_double_click_tap_counter_e2e(bridge):
+    url, state = bridge
+    driver = AndroidDriver(bridge_url=url, token=TOKEN)
+    m = _open_settings(driver)
+    counter = m.find_by_text("Tap counter")
+    assert counter is not None and counter.value == "0"
+    result = driver.act(A.double_click(counter.number), counter)
+    assert "double-tapped" in result
+    m = driver.perceive()
+    assert m.find_by_text("Tap counter").value == "2"
+    assert state.tap_count == 2
+    gestures = [g for g in state.gestures if g["kind"] == "double_click"]
+    assert gestures and gestures[-1]["from_ref"] == counter.body_ref
+    assert gestures[-1]["to_ref"] is None
+    payload = state.act_payloads[-1]
+    assert payload["target_ref"] == counter.body_ref
+    assert payload["expected"] == {
+        "tag": counter.tag,
+        "role": counter.role,
+        "name": counter.name,
+    }
+    assert payload["action"]["kind"] == "double_click"
+
+
+def test_drag_slider_to_wifi_sets_volume_50_e2e(bridge):
+    url, state = bridge
+    driver = AndroidDriver(bridge_url=url, token=TOKEN)
+    m = _open_settings(driver)
+    slider = m.find_by_text("Volume")
+    wifi = m.find_by_text("Wi-Fi")
+    assert slider is not None and wifi is not None
+    assert slider.attrs["bounds"] == "270,380,810,500"
+    dest_center_x, _ = _bounds_center(wifi)
+    assert dest_center_x == 540  # round(100*(540-270)/540) == 50
+    result = driver.act(A.drag(slider.number, wifi.number), slider)
+    assert "50" in result
+    assert state.volume == 50
+    m = driver.perceive()
+    assert m.find_by_text("Volume").value == "50"
+    gestures = [g for g in state.gestures if g["kind"] == "drag"]
+    assert gestures and gestures[-1]["from_ref"] == slider.body_ref
+    assert gestures[-1]["to_ref"] == wifi.body_ref
+    payload = state.act_payloads[-1]
+    assert payload["target_ref"] == slider.body_ref
+    assert payload["to_ref"] == wifi.body_ref
+    assert payload["to_expected"] == {
+        "tag": wifi.tag,
+        "role": wifi.role,
+        "name": wifi.name,
+    }
+
+
+def test_click_at_tap_counter_e2e(bridge):
+    url, state = bridge
+    driver = AndroidDriver(bridge_url=url, token=TOKEN)
+    m = _open_settings(driver)
+    counter = m.find_by_text("Tap counter")
+    center_x, center_y = _bounds_center(counter)
+    result = driver.act(A.click_at(center_x, center_y), None)
+    assert "Tap counter" in result
+    assert state.tap_count == 1
+    m = driver.perceive()
+    assert m.find_by_text("Tap counter").value == "1"
+    gestures = [g for g in state.gestures if g["kind"] == "click_at"]
+    assert gestures and gestures[-1]["from_ref"] == counter.body_ref
+    assert gestures[-1]["x"] == center_x
+    assert gestures[-1]["y"] == center_y
+    payload = state.act_payloads[-1]
+    assert "target_ref" not in payload
+    assert "expected" not in payload
+    assert payload["action"] == {
+        "kind": "click_at",
+        "x": center_x,
+        "y": center_y,
+    }
+
+
+def test_click_at_hit_nothing_e2e(bridge):
+    url, _state = bridge
+    driver = AndroidDriver(bridge_url=url, token=TOKEN)
+    driver.perceive()
+    with pytest.raises(HandsError, match="hit nothing"):
+        driver.act(A.click_at(2000, 2000), None)
+
+
 def test_android_runner_heals_after_screen_mutation(bridge):
     url, state = bridge
 

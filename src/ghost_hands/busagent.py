@@ -706,11 +706,15 @@ def boot_ghostbus_server(
     """Boot the real GhostBus http-server.mjs on an ephemeral port.
     Returns (process, base_url).
 
-    The store defaults to GhostBus's ``:memory:`` store: the demo is
-    ephemeral by design, and the file-backed store writes through a
-    single shared ``.tmp`` file whose rename races under concurrent
-    agent + poller traffic (observed: HTTP 400 ENOENT on rename). The
-    in-memory store is the same server, the same REST API, no disk."""
+    The store defaults to GhostBus's ``:memory:`` store because the
+    demo is ephemeral by design. A file-backed store (pass
+    ``store_dir``) works just as well: the shared-``.tmp`` rename race
+    the v0.4 demo originally routed around (HTTP 400 ENOENT on rename
+    under concurrent agent + poller traffic) was fixed in GhostBus
+    0.4.1 — unique temp file per save plus serialized saves — and is
+    regression-tested in the GhostBus suite since 0.5.0; the v0.7
+    bench runs this same demo against a file store to keep proving
+    it. Same server, same REST API either way."""
     node = shutil.which("node")
     if node is None:
         raise BusDemoUnavailable("node is not on PATH — GhostBus cannot boot")
@@ -790,6 +794,7 @@ def run_bus_demo(
     ghostbus_dir: Optional[Path] = None,
     approval_timeout: float = 60.0,
     log: Optional[Callable[[str], None]] = None,
+    store_dir: Optional[Path] = None,
 ) -> dict:
     """End-to-end proof against the REAL GhostBus node server:
 
@@ -803,7 +808,10 @@ def run_bus_demo(
     log = log or (lambda msg: None)
     ghostbus_dir = ghostbus_dir or default_ghostbus_dir()
     evidence: dict[str, Any] = {"server": "real GhostBus node http-server.mjs"}
-    proc, base_url = boot_ghostbus_server(ghostbus_dir, key="bus-demo-key")
+    proc, base_url = boot_ghostbus_server(
+        ghostbus_dir, store_dir=store_dir, key="bus-demo-key"
+    )
+    evidence["store"] = "file" if store_dir is not None else ":memory:"
     evidence["bus_url"] = base_url
     fixture_server, fixture_base = _serve_fixture()
     try:

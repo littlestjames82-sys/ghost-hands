@@ -18,6 +18,13 @@ A Policy maps each class to allow / ask / deny and carries a domain
 allowlist (empty = all allowed) plus blocked domains. The Runner records
 the Governor's verdict to the trail *before* executing — a denied or
 unapproved action never runs.
+
+v0.8: a Policy may also carry ``deny_patterns`` — substrings that, when
+found (case-insensitively) in a target element's name/label or in the
+page/action URL, deny the action outright regardless of class. This is
+the hook the ``seatbelt`` policy pack uses against prompt-injection-
+shaped targets; it is data on the Policy, so any pack (or a hand-written
+policy file) can use it.
 """
 
 from __future__ import annotations
@@ -157,6 +164,12 @@ class Policy:
     consequential: str = ASK
     allowed_domains: tuple[str, ...] = ()
     blocked_domains: tuple[str, ...] = ()
+    # v0.8: content deny-patterns (normalized to lowercase). When any
+    # pattern appears in the target element's name/label or in the
+    # page/action URL, the Governor denies outright — before class
+    # outcomes and domain rules — because a poisoned target is not a
+    # class question at all. Empty (the default) changes nothing.
+    deny_patterns: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         for name in ("readonly", "write", "consequential"):
@@ -165,6 +178,9 @@ class Policy:
                 raise ValueError(f"policy {name} must be one of {OUTCOMES}, got {val!r}")
         self.allowed_domains = tuple(d.lower() for d in self.allowed_domains)
         self.blocked_domains = tuple(d.lower() for d in self.blocked_domains)
+        self.deny_patterns = tuple(
+            p.lower() for p in self.deny_patterns if p and p.strip()
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Policy":
@@ -174,6 +190,7 @@ class Policy:
             consequential=data.get("consequential", ASK),
             allowed_domains=tuple(data.get("allowed_domains", ())),
             blocked_domains=tuple(data.get("blocked_domains", ())),
+            deny_patterns=tuple(data.get("deny_patterns", ())),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -183,6 +200,7 @@ class Policy:
             "consequential": self.consequential,
             "allowed_domains": list(self.allowed_domains),
             "blocked_domains": list(self.blocked_domains),
+            "deny_patterns": list(self.deny_patterns),
         }
 
     def for_class(self, classification: str) -> str:
@@ -218,6 +236,40 @@ class Governor:
     ) -> Decision:
         classification = self.classify(action, element, page_url)
         policy = self.policy
+
+        # Content deny-patterns first: a target whose own text (or the
+        # URL) is shaped like an instruction to the agent is denied
+        # outright, whatever its class would otherwise earn.
+        if policy.deny_patterns:
+            haystacks: list[str] = []
+            if element is not None:
+                if element.name:
+                    haystacks.append(element.name)
+                if element.label:
+                    haystacks.append(element.label)
+            if page_url:
+                haystacks.append(page_url)
+            if action.url:
+                haystacks.append(action.url)
+            lowered: list[str] = []
+            for haystack in haystacks:
+                lowered.append(haystack.lower())
+                # URLs spell phrases with separators (click-here-to-
+                # claim, click_here, click%20here): also match the
+                # phrase with those folded back to spaces.
+                folded = haystack.lower().replace("%20", " ")
+                for sep in "-_+":
+                    folded = folded.replace(sep, " ")
+                if folded != lowered[-1]:
+                    lowered.append(folded)
+            for pattern in policy.deny_patterns:
+                if any(pattern in h for h in lowered):
+                    return Decision(
+                        classification,
+                        DENY,
+                        "seatbelt: injection-shaped target "
+                        f"(matched '{pattern}')",
+                    )
 
         effective_url = action.url if action.kind == "navigate" else page_url
         host = _hostname(effective_url)

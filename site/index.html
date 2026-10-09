@@ -186,13 +186,17 @@
     </p>
     <div class="install">
       <code>$ pip install ghost-hands</code><span class="soon">Live on PyPI</span>
-      <p>v0.3.0 is live on <a href="https://pypi.org/project/ghost-hands/">PyPI</a>
+      <p>v0.6.0 is live on <a href="https://pypi.org/project/ghost-hands/">PyPI</a>
       and <a href="https://github.com/littlestjames82-sys/ghost-hands">GitHub</a>;
-      the current build is <strong>v0.6.0</strong> — approvals by phone:
-      consequential actions can be decided on Ryan's phone (a MrGhosty
-      notification + in-app Approve/Deny) through the same bridge the
-      AndroidDriver uses, alongside GhostBus agent mode, the Body
-      Protocol, and policy packs.
+      the current build is <strong>v0.9.0</strong> — the field kit
+      wave: `ghost-hands doctor` (whole-stack diagnostics with
+      plain-language fixes) and `ghost-hands phone-proof` (the
+      guided on-device proof), alongside trail → HTML audit reports
+      (`ghost-hands report`), MCP parity across all four bodies with
+      phone approvals, the seatbelt policy pack denying
+      prompt-injection-shaped targets, the model-evaluation harness, Android gestures in
+      MrGhosty v1.8.0, approvals by phone, GhostBus agent mode, the
+      Body Protocol, and policy packs.
       Nothing here is vaporware: every number below was measured on the
       current build.</p>
     </div>
@@ -291,11 +295,11 @@
 
   <section>
     <h2>Verified, <span class="accent">not vibes</span></h2>
-    <p class="lede">Measured on the v0.6.0 build, October 8, 2026 — the same
+    <p class="lede">Measured on the v0.9.0 build, October 8, 2026 — the same
     suites that ship in the repo.</p>
     <div class="stats">
-      <div class="stat"><div class="num">299</div><div class="lbl">pytest tests passing</div></div>
-      <div class="stat"><div class="num">88/88</div><div class="lbl">bench cases (offline suite)</div></div>
+      <div class="stat"><div class="num">395</div><div class="lbl">pytest tests passing</div></div>
+      <div class="stat"><div class="num">95/95</div><div class="lbl">bench cases (offline suite)</div></div>
       <div class="stat"><div class="num">2/2</div><div class="lbl">live cases: example.com + a real Wikipedia search</div></div>
       <div class="stat"><div class="num">0</div><div class="lbl">runtime dependencies</div></div>
     </div>
@@ -306,8 +310,10 @@
 <span class="k">stop</span>      denied · approval required, no approver</pre>
     <div class="honest">
       <strong>The honest limits:</strong> the LLM decider's wire protocol is
-      proven against a local stub endpoint; live-model driving quality is
-      unproven and depends on the model you bring. The Chromium driver is
+      proven against a local stub endpoint, and v0.7.0's eval harness now
+      grades any model you bring on 8 local tasks (the stub's 8/8 proves
+      the harness, not a model); live-model driving quality on real
+      websites is unproven and depends on the model you bring. The Chromium driver is
       proven on fixture pages plus example.com and Wikipedia — not on the
       whole web. There are no head-to-head speed benchmarks against other
       tools, and we won't claim any we haven't run. The bus agent is proven
@@ -330,7 +336,10 @@
       works the phone and the web. v0.6.0 added the phone approver:
       when a run hits a consequential action, the question goes to
       Ryan's phone and only his tap answers it — the bridge API can
-      ask, but it can never approve. Next: proving it on Ryan's
+      ask, but it can never approve. v0.7.0 built the measuring
+      instrument for model driving (the eval harness), taught the
+      Android body gestures, and closed the GhostBus file-store
+      loop. Next: proving it on Ryan's
       phone.
     </p>
   </section>

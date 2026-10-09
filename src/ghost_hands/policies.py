@@ -4,7 +4,7 @@ A pack is data, not code — each pack names the Governor outcome
 (allow / ask / deny) for every action class, an approval timeout (how
 long an approver channel may take before the answer counts as a deny),
 and optional domain-allowlist additions merged on top of the base
-policy. Three packs ship with Ghost Hands:
+policy. Four packs ship with Ghost Hands:
 
 - ``readonly`` — perception only. Writes and consequential actions are
   denied outright; nothing that changes state ever runs.
@@ -12,6 +12,13 @@ policy. Three packs ship with Ghost Hands:
   consequential asks a human.
 - ``strict`` — writes ask too, and consequential approvals run on a
   shorter leash (120s instead of 600s): a slow "yes" is a "no".
+- ``seatbelt`` (v0.8) — standard's posture, plus a target-content
+  rule: if a target element's name/label (or the page/action URL)
+  matches one of the curated prompt-injection patterns in
+  ``INJECTION_PATTERNS``, the action is denied outright — regardless
+  of class, before any allow could apply — and the govern event's
+  reason names the matched pattern. Consequential actions still ask,
+  on a 300s leash.
 
 Unknown pack names are a loud error that lists the known packs —
 never a silent fallback to a permissive policy.
@@ -26,6 +33,24 @@ from .errors import HandsError
 from .governor import ALLOW, ASK, DENY, Policy
 
 DEFAULT_APPROVAL_TIMEOUT = 600.0
+
+#: The seatbelt pack's curated prompt-injection patterns (v0.8).
+#: Matched case-insensitively as substrings against a target element's
+#: name/label and the page/action URL. The list is deliberately made of
+#: *instruction-shaped phrases* — imperative attempts to redirect the
+#: agent, or lures impersonating a security flow — never bare words:
+#: a button named "Ignore" or a heading saying "ignore the noise" does
+#: not trip it. Curated means a human chose each entry; extend it in
+#: this one place, as data, when a new shape shows up in the wild.
+INJECTION_PATTERNS: tuple[str, ...] = (
+    "ignore previous instructions",
+    "ignore all instructions",
+    "disregard your instructions",
+    "you are now",
+    "system prompt",
+    "click here to claim",
+    "verify your password to continue",
+)
 
 
 @dataclass(frozen=True)
@@ -83,6 +108,20 @@ _PACK_DEFS: dict[str, dict[str, Any]] = {
         "approval_timeout": 120.0,
         "allowed_domains": (),
     },
+    "seatbelt": {
+        "description": (
+            "Standard's posture plus the seatbelt rule: a target whose "
+            "text (or URL) matches a curated prompt-injection pattern "
+            "is denied outright, whatever its class; consequential "
+            "actions ask on a 300s leash."
+        ),
+        "readonly": ALLOW,
+        "write": ALLOW,
+        "consequential": ASK,
+        "approval_timeout": 300.0,
+        "allowed_domains": (),
+        "deny_patterns": INJECTION_PATTERNS,
+    },
 }
 
 PACK_NAMES = tuple(_PACK_DEFS)
@@ -109,12 +148,20 @@ def load_pack(name: str, base: Optional[Policy] = None) -> PolicyPack:
             tuple(base.allowed_domains) + tuple(spec["allowed_domains"])
         )
     )
+    # Deny-patterns merge the same way: the pack's list extends (never
+    # silently drops) whatever the base policy already denies on sight.
+    deny_patterns = tuple(
+        dict.fromkeys(
+            tuple(base.deny_patterns) + tuple(spec.get("deny_patterns", ()))
+        )
+    )
     policy = Policy(
         readonly=spec["readonly"],
         write=spec["write"],
         consequential=spec["consequential"],
         allowed_domains=allowed,
         blocked_domains=tuple(base.blocked_domains),
+        deny_patterns=deny_patterns,
     )
     return PolicyPack(
         name=key,

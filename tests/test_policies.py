@@ -16,7 +16,7 @@ from pages_fixtures import LOGIN_PAGES, SHOP_PAGES
 
 
 def test_pack_names():
-    assert pack_names() == ["readonly", "standard", "strict"]
+    assert pack_names() == ["readonly", "seatbelt", "standard", "strict"]
 
 
 def test_standard_is_the_longstanding_default():

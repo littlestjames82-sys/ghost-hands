@@ -21,6 +21,11 @@ The bridge contract (docs/BODY_PROTOCOL.md §6):
   mismatch: ..." — the exact phrases the Runner's self-healing keys
   on, so healing works on this body exactly like on the web bodies.
 
+Gestures (v0.7): ``double_click`` is a targeted act like ``click``;
+``drag`` sends the source target plus ``to_ref`` / ``to_expected``
+for the destination element resolved from the last perceived map;
+``click_at`` sends raw ``x`` / ``y`` coordinates with no target.
+
 Every request carries the pairing token as ``X-Ghost-Hands-Token``.
 The token comes from the constructor argument or the
 ``GHOST_HANDS_ANDROID_TOKEN`` environment variable; it is never
@@ -28,8 +33,9 @@ logged, never written to the trail, and never included in error text.
 
 Safety rails: the bridge URL must be loopback unless the caller
 explicitly passes ``allow_nonlocal=True`` (the CLI never does), and
-web-only actions (select / hover / fill_form / pdf / ...) fail
-honestly instead of being faked against a phone.
+web-only actions with no honest Android equivalent (select / hover /
+right_click / fill_form / set_file / download / pdf / set_viewport)
+fail honestly instead of being faked against a phone.
 """
 
 from __future__ import annotations
@@ -61,10 +67,7 @@ SUPPORTED_PRESS_KEYS = ("Back", "Home", "Recents", "Notifications", "QuickSettin
 _UNSUPPORTED_KINDS = (
     "select",
     "hover",
-    "double_click",
     "right_click",
-    "drag",
-    "click_at",
     "fill_form",
     "set_file",
     "download",
@@ -354,12 +357,15 @@ class AndroidDriver:
         action_dict: dict,
         element: Optional[Element],
         expected: Optional[dict],
+        extra: Optional[dict] = None,
     ) -> dict:
         payload: dict[str, Any] = {"action": action_dict}
         if element is not None:
             payload["target_ref"] = element.body_ref
         if expected is not None:
             payload["expected"] = expected
+        if extra:
+            payload.update(extra)
         resp = self._request("POST", "/v1/act", payload)
         if resp.get("ok") is not True:
             raise HandsError(
@@ -386,7 +392,11 @@ class AndroidDriver:
             return self._act_wait(action)
         if kind == "navigate":
             return self._act_remote(action, element)
-        if kind in ("click", "type"):
+        if kind == "click_at":
+            return self._act_click_at(action)
+        if kind == "drag":
+            return self._act_drag(action, element)
+        if kind in ("click", "double_click", "type"):
             if element is None:
                 raise HandsError(f"{kind} requires a target element")
             if element.body_ref is None:
@@ -399,6 +409,51 @@ class AndroidDriver:
         if kind in ("press", "scroll", "extract", "screenshot"):
             return self._act_remote(action, element)
         raise HandsError(f"unsupported on Android body: {kind}")
+
+    def _act_click_at(self, action: Action) -> str:
+        # Raw coordinates: no element, no target_ref, no expected.
+        if action.x is None or action.y is None:
+            raise HandsError(
+                "click_at requires x and y coordinates — pass both, "
+                "e.g. click_at(x, y) from the element's bounds centre"
+            )
+        return self._act_remote(action, None)
+
+    def _act_drag(self, action: Action, element: Optional[Element]) -> str:
+        if element is None:
+            raise HandsError("drag requires a source element")
+        if element.body_ref is None:
+            raise HandsError(
+                f"target missing: [{element.number}] "
+                f"<{element.tag}> \"{element.name}\" carries no "
+                "Android body_ref — re-perceive on the Android body"
+            )
+        dest_error = (
+            "drag needs a destination in the last perceived map "
+            "— re-perceive and retry"
+        )
+        if action.to_target is None or self._last_map is None:
+            raise HandsError(dest_error)
+        dest = self._last_map.get(action.to_target)
+        if dest is None:
+            raise HandsError(dest_error)
+        if dest.body_ref is None:
+            raise HandsError(
+                f"target missing: drag destination [{dest.number}] "
+                f"<{dest.tag}> \"{dest.name}\" carries no Android "
+                "body_ref — re-perceive on the Android body"
+            )
+        resp = self._post_act(
+            action.to_dict(),
+            element,
+            self._expected_for(element),
+            extra={
+                "to_ref": dest.body_ref,
+                "to_expected": self._expected_for(dest),
+            },
+        )
+        result = resp.get("result")
+        return str(result if result is not None else "ok")
 
     def _act_remote(self, action: Action, element: Optional[Element]) -> str:
         kind = action.kind

@@ -162,7 +162,7 @@ def test_perceive_maps_elements_with_body_ref(driver):
     assert notes.role == "app_icon"
     assert notes.body_ref == "0/0"
     assert notes.attrs["package"] == "com.android.launcher3"
-    assert notes.attrs["bounds"] == "0,100,1080,220"
+    assert notes.attrs["bounds"] == "0,100,540,340"
     descriptor = notes.descriptor()
     assert descriptor["body_ref"] == "0/0"
     assert element_map.get(2).body_ref == "0/1"
@@ -285,10 +285,7 @@ def test_wait_plain_and_condition(driver):
     [
         A.select(1, "x"),
         A.hover(1),
-        A.double_click(1),
         A.right_click(1),
-        A.drag(1, 2),
-        A.click_at(10, 10),
         A.fill_form({"a": "b"}),
         A.set_file(1, "/tmp/x"),
         A.download(url="https://example.com/x"),
@@ -316,3 +313,79 @@ def test_click_without_body_ref_is_target_missing(driver):
 def test_close_is_idempotent(driver):
     driver.close()
     driver.close()
+
+
+# -- gestures (v0.7): driver-side validation, before any HTTP ----------------
+
+
+def test_drag_without_perceive_raises_before_http(bridge):
+    url, state = bridge
+    fresh = AndroidDriver(bridge_url=url, token=TOKEN)
+    source = Element(
+        number=1, tag="SeekBar", role="slider", name="Volume", body_ref="0/2"
+    )
+    with pytest.raises(
+        HandsError, match="drag needs a destination in the last perceived map"
+    ):
+        fresh.act(A.drag(1, 2), source)
+    assert state.act_payloads == []
+    assert state.gestures == []
+
+
+def test_drag_to_unknown_destination_raises_before_http(driver, bridge):
+    _url, state = bridge
+    m = driver.perceive()
+    settings = m.get(2)
+    driver.act(A.click(settings.number), settings)
+    m = driver.perceive()
+    slider = m.find_by_text("Volume")
+    payloads_before = len(state.act_payloads)
+    with pytest.raises(
+        HandsError, match="drag needs a destination in the last perceived map"
+    ):
+        driver.act(A.drag(slider.number, 999), slider)
+    # No act crossed the wire for the refused drag.
+    assert len(state.act_payloads) == payloads_before
+    assert [g for g in state.gestures if g["kind"] == "drag"] == []
+
+
+def test_drag_without_source_raises(driver):
+    driver.perceive()
+    with pytest.raises(HandsError, match="drag requires a source"):
+        driver.act(A.drag(1, 2), None)
+
+
+def test_drag_without_to_target_raises_before_http(driver, bridge):
+    _url, state = bridge
+    m = driver.perceive()
+    settings = m.get(2)
+    driver.act(A.click(settings.number), settings)
+    m = driver.perceive()
+    slider = m.find_by_text("Volume")
+    payloads_before = len(state.act_payloads)
+    action = A.Action(kind="drag", target=slider.number)
+    with pytest.raises(
+        HandsError, match="drag needs a destination in the last perceived map"
+    ):
+        driver.act(action, slider)
+    assert len(state.act_payloads) == payloads_before
+
+
+def test_click_at_reaches_http_not_local_refusal():
+    # click_at is no longer in the locally-refused kinds: against a
+    # dead port it fails at the HTTP layer, not with "unsupported".
+    driver = AndroidDriver(
+        bridge_url=f"http://127.0.0.1:{_closed_port()}", token=TOKEN, timeout=2
+    )
+    with pytest.raises(HandsError, match="could not reach"):
+        driver.act(A.click_at(10, 10), None)
+
+
+def test_click_at_without_coordinates_raises_before_http():
+    driver = AndroidDriver(
+        bridge_url=f"http://127.0.0.1:{_closed_port()}", token=TOKEN
+    )
+    with pytest.raises(HandsError, match="click_at requires x and y"):
+        driver.act(A.Action(kind="click_at"), None)
+    with pytest.raises(HandsError, match="click_at requires x and y"):
+        driver.act(A.Action(kind="click_at", x=10.0), None)

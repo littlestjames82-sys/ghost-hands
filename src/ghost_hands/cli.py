@@ -1,5 +1,6 @@
 """Command line: ghost-hands demo | bench | run | export | mcp |
-bus-agent | bus-demo | android-status | phone-approval-test."""
+bus-agent | bus-demo | android-status | phone-approval-test | eval |
+report | doctor | phone-proof."""
 
 from __future__ import annotations
 
@@ -183,6 +184,20 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_report(args) -> int:
+    """Render a trail JSONL as a self-contained HTML audit report
+    (v0.8). Default output: the trail path with an .html suffix."""
+    from .report import write_report
+
+    try:
+        target = write_report(args.trail_file, args.output)
+    except OSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {target}")
+    return 0
+
+
 def _bus_client_from_args(args):
     from .busclient import BusClient
 
@@ -274,6 +289,61 @@ def cmd_android_status(args) -> int:
     return 0
 
 
+def cmd_eval(args) -> int:
+    """The v0.7 model-evaluation harness: graded tasks, three
+    deciders. Task failures are data; exit 0 means the harness ran."""
+    from . import evaluate
+
+    task_names = (
+        [name.strip() for name in args.tasks.split(",") if name.strip()]
+        if args.tasks
+        else None
+    )
+    kinds = (
+        ["stub", "rules", "openai"]
+        if args.decider == "all"
+        else [args.decider]
+    )
+    payloads: list[dict] = []
+    for kind in kinds:
+        notes: list[str] = []
+        if kind == "openai":
+            cfg = evaluate.resolve_real_model()
+            if cfg is None:
+                print(
+                    "real-model run skipped: "
+                    f"{evaluate.real_model_gap()}"
+                )
+                continue
+            notes.append(
+                "real model: "
+                f"{cfg['model']} at {cfg['base_url']} "
+                f"(source: {cfg['source']}); API key read from the "
+                "environment, never printed or stored"
+            )
+        if kind == "stub":
+            notes.append(evaluate.STUB_LABEL)
+        try:
+            scores, label = evaluate.run_eval(
+                kind, task_names=task_names, budget=args.budget
+            )
+        except HandsError as exc:
+            print(str(exc))
+            return 2
+        print(evaluate.format_suite(scores, label))
+        print()
+        payloads.append(evaluate.suite_json(scores, label, notes))
+    if args.report and payloads:
+        payload = (
+            payloads[0] if len(payloads) == 1 else {"suites": payloads}
+        )
+        Path(args.report).write_text(
+            json.dumps(payload, indent=2), encoding="utf-8"
+        )
+        print(f"eval report written to {args.report}")
+    return 0
+
+
 def cmd_phone_approval_test(args) -> int:
     """Ryan's one-command on-device proof: a harmless test approval
     travels to the phone; approving it runs nothing."""
@@ -300,6 +370,42 @@ def cmd_phone_approval_test(args) -> int:
         return 1
     print(status.upper())
     return 0 if status == "approved" else 1
+
+
+def cmd_doctor(args) -> int:
+    """One-command diagnostics for the whole stack (v0.9). Exit 1
+    iff any check FAILs; --json emits the checks as structured data."""
+    from .doctor import doctor_exit_code, doctor_json, format_doctor, run_doctor
+
+    checks = run_doctor(
+        bus_url=getattr(args, "bus", None),
+        bridge_url=getattr(args, "android_bridge", None),
+        bridge_token=getattr(args, "android_token", None),
+        timeout=args.timeout,
+    )
+    if args.json:
+        print(doctor_json(checks))
+    else:
+        print(format_doctor(checks))
+    return doctor_exit_code(checks)
+
+
+def cmd_phone_proof(args) -> int:
+    """The guided on-device proof (v0.9): configuration, the adb
+    forward, the bridge status, and the test approval — each step
+    checked. Exit codes: 0 proven, 1 error, 2 needs-setup,
+    3 not approved."""
+    from .phone_proof import run_phone_proof
+
+    input_fn = input if sys.stdin.isatty() else None
+    return run_phone_proof(
+        bridge_url=getattr(args, "android_bridge", None),
+        token=getattr(args, "android_token", None),
+        timeout=args.timeout,
+        poll_interval=args.poll_interval,
+        assume_yes=args.yes,
+        input_fn=input_fn,
+    )
 
 
 def cmd_bus_demo(args) -> int:
@@ -364,7 +470,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument(
         "--policy-pack",
         choices=pack_names(),
-        help="named policy pack (alternative to --policy): readonly | standard | strict",
+        help="named policy pack (alternative to --policy): "
+        "readonly | standard | strict | seatbelt",
     )
     p_run.add_argument("--approve-all", action="store_true",
                        help="approve every consequential action without asking")
@@ -391,6 +498,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     sub.add_parser("mcp", help="serve the MCP tools on stdio")
+
+    p_report = sub.add_parser(
+        "report",
+        help="render a trail JSONL as a self-contained HTML audit "
+        "report (default output: the trail path with an .html suffix)",
+    )
+    p_report.add_argument("trail_file", help="the trail JSONL to render")
+    p_report.add_argument(
+        "-o", "--output", help="output .html path (default: trail path + .html)"
+    )
 
     p_bus = sub.add_parser(
         "bus-agent",
@@ -461,6 +578,92 @@ def build_parser() -> argparse.ArgumentParser:
                               help="seconds to wait for the phone's decision (default 600)")
     p_phone_test.add_argument("--poll-interval", type=float, default=1.0,
                               help="seconds between status polls (default 1)")
+
+    p_eval = sub.add_parser(
+        "eval",
+        help="run the graded model-evaluation suite (v0.7): 8 tasks "
+        "against local fixtures, scored on success, steps, wall time, "
+        "perception cost, approvals and heals",
+    )
+    p_eval.add_argument(
+        "--decider",
+        choices=("stub", "rules", "openai", "all"),
+        default="stub",
+        help="stub = local deterministic stub model server (harness "
+        "verification only); rules = RuleDecider baseline; openai = a "
+        "real model from the environment; all = every available one",
+    )
+    p_eval.add_argument(
+        "--tasks",
+        help="comma-separated task names to run (default: all 8)",
+    )
+    p_eval.add_argument(
+        "--budget", type=int, default=None,
+        help="per-task step budget override",
+    )
+    p_eval.add_argument(
+        "--report",
+        help="also write a JSON report to this path",
+    )
+
+    p_doctor = sub.add_parser(
+        "doctor",
+        help="diagnose the whole stack in one pass (v0.9): runtime, "
+        "Chromium, policy packs, model env, GhostBus and the phone "
+        "bridge when configured, adb — PASS/WARN/FAIL rows with "
+        "plain-language fixes; exit 1 iff anything FAILs",
+    )
+    p_doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="emit the checks as structured JSON instead of the table",
+    )
+    p_doctor.add_argument(
+        "--bus",
+        help="GhostBus base URL to check (env GHOST_HANDS_BUS_URL / "
+        "GHOSTBUS_URL; unconfigured = a WARN row, bus features idle)",
+    )
+    p_doctor.add_argument(
+        "--android-bridge",
+        help="MrGhosty bridge URL to check (env "
+        "GHOST_HANDS_ANDROID_BRIDGE; default http://127.0.0.1:8378)",
+    )
+    p_doctor.add_argument(
+        "--android-token",
+        help="Ghost Hands pairing token — prefer the "
+        "GHOST_HANDS_ANDROID_TOKEN env var; never printed",
+    )
+    p_doctor.add_argument(
+        "--timeout",
+        type=float,
+        default=3.0,
+        help="seconds each network probe may take (default 3)",
+    )
+
+    p_proof = sub.add_parser(
+        "phone-proof",
+        help="the guided on-device proof (v0.9): checks the bridge "
+        "configuration, forwards the port over adb when a device is "
+        "attached, verifies the bridge status, and sends the harmless "
+        "test approval to the phone. Exit codes: 0 proven, 1 error, "
+        "2 needs-setup, 3 not approved",
+    )
+    p_proof.add_argument(
+        "--android-bridge",
+        help="bridge URL (env GHOST_HANDS_ANDROID_BRIDGE; "
+        "default http://127.0.0.1:8378)",
+    )
+    p_proof.add_argument(
+        "--android-token",
+        help="pairing token — prefer the GHOST_HANDS_ANDROID_TOKEN "
+        "env var; never printed, never stored",
+    )
+    p_proof.add_argument("--timeout", type=float, default=600.0,
+                          help="seconds to wait for the phone's decision (default 600)")
+    p_proof.add_argument("--poll-interval", type=float, default=1.0,
+                         help="seconds between approval status polls (default 1)")
+    p_proof.add_argument("--yes", action="store_true",
+                          help="run straight through without pausing between steps")
     return parser
 
 
@@ -472,10 +675,14 @@ def main(argv=None) -> int:
         "run": cmd_run,
         "export": cmd_export,
         "mcp": cmd_mcp,
+        "report": cmd_report,
         "bus-agent": cmd_bus_agent,
         "bus-demo": cmd_bus_demo,
         "android-status": cmd_android_status,
         "phone-approval-test": cmd_phone_approval_test,
+        "eval": cmd_eval,
+        "doctor": cmd_doctor,
+        "phone-proof": cmd_phone_proof,
     }
     return handlers[args.command](args)
 

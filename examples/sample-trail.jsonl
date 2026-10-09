@@ -1,0 +1,29 @@
+{"type": "run", "step": 0, "ts": 1700000000.0, "goal": "Buy the blue mug", "run_id": "r1"}
+{"type": "perceive", "step": 1, "ts": 1700000001.0, "url": "https://shop.test/", "title": "Shop", "elements": 6, "map_chars": 1200, "signature": "sig1"}
+{"type": "decide", "step": 1, "ts": 1700000001.0, "action": {"kind": "click", "target": 2}}
+{"type": "govern", "step": 1, "ts": 1700000001.0, "action": {"kind": "click", "target": 2}, "classification": "readonly", "outcome": "allow", "reason": "readonly actions are allowed"}
+{"type": "execute", "step": 1, "ts": 1700000001.0, "action": {"kind": "click", "target": 2}, "classification": "readonly", "element": {"number": 2, "tag": "a", "role": "link", "name": "Mugs"}}
+{corrupt line — tolerance demo
+{"type": "result", "step": 1, "ts": 1700000002.0, "ok": true, "result": "navigated to https://shop.test/mugs"}
+{"type": "Document", "step": 1, "ts": 1700000002.0, "method": "GET", "url": "https://shop.test/mugs", "status": 200}
+{"type": "perceive", "step": 2, "ts": 1700000003.0, "url": "https://shop.test/login", "title": "Sign in", "elements": 4, "map_chars": 640, "signature": "sig2"}
+{"type": "decide", "step": 2, "ts": 1700000003.0, "action": {"kind": "type", "target": 9, "text": "hunter2secret"}}
+{"type": "govern", "step": 2, "ts": 1700000003.0, "action": {"kind": "type", "target": 9, "text": "hunter2secret"}, "classification": "write", "outcome": "allow", "reason": "write allowed"}
+{"type": "heal", "step": 2, "ts": 1700000003.0, "action": {"kind": "type", "target": 9}, "descriptor": {"tag": "input", "role": "textbox", "name": "Password"}, "from_target": 9, "to_target": 3, "found": true, "trigger": "target missing"}
+{"type": "execute", "step": 2, "ts": 1700000004.0, "action": {"kind": "type", "target": 3, "text": "hunter2secret"}, "classification": "write", "healed": true, "element": {"number": 3, "tag": "input", "role": "textbox", "name": "Password", "type": "password"}}
+{"type": "result", "step": 2, "ts": 1700000004.0, "ok": true, "result": "typed 13 chars into [3]"}
+{"type": "perceive", "step": 3, "ts": 1700000005.0, "url": "https://shop.test/cart", "title": "Cart", "elements": 5, "map_chars": 800, "signature": "sig3"}
+{"type": "decide", "step": 3, "ts": 1700000005.0, "action": {"kind": "click", "target": 4}}
+{"type": "govern", "step": 3, "ts": 1700000005.0, "action": {"kind": "click", "target": 4}, "classification": "consequential", "outcome": "ask", "reason": "consequential actions require approval"}
+{"type": "approval", "step": 3, "ts": 1700000005.0, "channel": "phone", "phase": "request", "request_id": "appr-1", "classification": "consequential", "summary": "click [4] 'Place order' \u2014 Cart (shop.test)"}
+{"type": "approval", "step": 3, "ts": 1700000009.0, "channel": "phone", "phase": "decision", "request_id": "appr-1", "approved": true, "decided_by": "phone"}
+{"type": "execute", "step": 3, "ts": 1700000009.0, "action": {"kind": "click", "target": 4}, "classification": "consequential", "element": {"number": 4, "tag": "button", "role": "button", "name": "Place order"}}
+{"type": "result", "step": 3, "ts": 1700000010.0, "ok": true, "result": "order placed"}
+{"type": "dialog", "step": 3, "ts": 1700000010.0, "dialog_type": "alert", "message": "Thanks for your order", "decision": "accepted", "policy": "accept", "url": "https://shop.test/cart"}
+{"type": "download", "step": 3, "ts": 1700000011.0, "filename": "receipt.pdf", "bytes": 2048, "url": "https://shop.test/receipt.pdf", "state": "completed"}
+{"type": "perceive", "step": 4, "ts": 1700000012.0, "url": "https://shop.test/account", "title": "Account", "elements": 3, "map_chars": 420, "signature": "sig4"}
+{"type": "decide", "step": 4, "ts": 1700000012.0, "action": {"kind": "click", "target": 1}}
+{"type": "govern", "step": 4, "ts": 1700000012.0, "action": {"kind": "click", "target": 1}, "classification": "consequential", "outcome": "ask", "reason": "consequential actions require approval"}
+{"type": "approval", "step": 4, "ts": 1700000012.0, "channel": "bus", "phase": "request", "run_id": "run-9", "classification": "consequential", "action": {"kind": "click", "target": 1}}
+{"type": "approval", "step": 4, "ts": 1700000020.0, "channel": "bus", "phase": "decision", "run_id": "run-9", "approved": false, "decided_by": "operator"}
+{"type": "stop", "step": 4, "ts": 1700000020.0, "reason": "denied", "summary": "approval denied by operator"}
