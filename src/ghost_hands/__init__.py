@@ -56,6 +56,7 @@ from .drivers import ChromiumDriver, FakeDriver
 from .errors import HandsError
 from .export import export_ghost_hands_script
 from .eyes import Element, ElementMap
+from .ghostguard import GhostGuardBridgeError, GhostGuardGovernor, governor_from_env
 from .governor import Governor, Policy, classify
 from .phone_approver import ObservingDecider, PhoneApprover, build_summary
 from .phone_proof import run_phone_proof
@@ -77,6 +78,8 @@ __all__ = [
     "Element",
     "ElementMap",
     "FakeDriver",
+    "GhostGuardBridgeError",
+    "GhostGuardGovernor",
     "Governor",
     "HandsError",
     "ObservingDecider",
@@ -93,6 +96,7 @@ __all__ = [
     "build_summary",
     "classify",
     "export_ghost_hands_script",
+    "governor_from_env",
     "load_pack",
     "read_trail",
     "run_doctor",
