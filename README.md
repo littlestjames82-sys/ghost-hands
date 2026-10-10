@@ -388,6 +388,23 @@ driver.close()
 
 ## How it works
 
+```mermaid
+flowchart LR
+    Agent["Agent / decider"] -->|proposed action| Runner
+    Eyes["Eyes: numbered element map"] --> Runner["Runner"]
+    Runner -->|classify + check policy| Governor["Governor"]
+    Governor -->|allow| Trail["Provenance trail"]
+    Governor -->|ask| Human["Human approval"]
+    Human -->|approved| Trail
+    Trail -->|record before execute| Body["Selected body"]
+    Body --> Result["Action result"]
+    Result -->|next observation| Eyes
+    Body -. "same contract" .-> Bodies["Fake · Chromium · SimPhone · Android"]
+```
+
+Every path to a body passes through the Governor. The trail records the
+decision before execution; an ask reaches the body only after approval.
+
 | Layer | What it does |
 |---|---|
 | **Eyes** (`eyes.py`) | Numbered **ElementMap** — `[3] <button> "Sign in"` — compact text with a character budget. No screenshots, no vision model. Two sources: an HTML snapshot parse (offline body), or the live browser — a composed-tree DOM walk (shadow roots + iframes) or the CDP Accessibility tree. |

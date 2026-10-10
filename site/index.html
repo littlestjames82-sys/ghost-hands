@@ -159,6 +159,62 @@
     font-size: 15px;
   }
   .honest strong { color: var(--text); }
+  .flow {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 26px;
+    align-items: stretch;
+  }
+  .flow-step {
+    position: relative;
+    min-height: 132px;
+    padding: 18px 16px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+  }
+  .flow-step:not(:last-child)::after {
+    content: "→";
+    position: absolute;
+    top: 42px;
+    right: -15px;
+    z-index: 1;
+    color: var(--violet-bright);
+    font-size: 22px;
+    font-weight: 700;
+  }
+  .flow-step .number {
+    display: block;
+    color: var(--violet-bright);
+    font-family: Consolas, Menlo, monospace;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    margin-bottom: 8px;
+  }
+  .flow-step h3 { font-size: 16px; margin-bottom: 5px; }
+  .flow-step p { color: var(--muted); font-size: 13px; }
+  .flow-note {
+    grid-column: 3 / 5;
+    padding: 12px 16px;
+    border: 1px dashed var(--amber);
+    border-radius: 12px;
+    color: var(--muted);
+    font-size: 13px;
+    text-align: center;
+  }
+  .flow-note strong { color: var(--amber); }
+  @media (max-width: 700px) {
+    .flow { grid-template-columns: 1fr; gap: 10px; }
+    .flow-step { min-height: 0; }
+    .flow-step:not(:last-child)::after {
+      content: "↓";
+      top: auto;
+      right: 18px;
+      bottom: -17px;
+    }
+    .flow-note { grid-column: auto; }
+  }
   footer {
     margin-top: 64px;
     padding: 30px 0 46px;
@@ -290,6 +346,39 @@
         driver is specified in the protocol; the simulator is its
         rehearsal.</p>
       </div>
+    </div>
+  </section>
+
+  <section aria-labelledby="governed-flow-title">
+    <h2 id="governed-flow-title">One loop. <span class="accent">Every body.</span></h2>
+    <p class="lede">The same governed sequence applies whether the hands work a web page or a phone.</p>
+    <div class="flow" role="list" aria-label="Ghost Hands action flow">
+      <article class="flow-step" role="listitem">
+        <span class="number">01 · PERCEIVE</span>
+        <h3>See the surface</h3>
+        <p>Build a numbered map of the current page or screen.</p>
+      </article>
+      <article class="flow-step" role="listitem">
+        <span class="number">02 · DECIDE</span>
+        <h3>Choose an action</h3>
+        <p>A script, offline rules, or a model proposes the next step.</p>
+      </article>
+      <article class="flow-step" role="listitem">
+        <span class="number">03 · GOVERN</span>
+        <h3>Check the policy</h3>
+        <p>Classify the action and allow, ask, or deny before it runs.</p>
+      </article>
+      <article class="flow-step" role="listitem">
+        <span class="number">04 · RECORD</span>
+        <h3>Write the receipt</h3>
+        <p>Record the verdict before the body performs an approved action.</p>
+      </article>
+      <article class="flow-step" role="listitem">
+        <span class="number">05 · ACT</span>
+        <h3>Execute and observe</h3>
+        <p>Run on the selected body, record the result, and perceive again.</p>
+      </article>
+      <p class="flow-note"><strong>When the Governor asks:</strong> wait for a human decision. No approver means deny — silence is never consent.</p>
     </div>
   </section>
 

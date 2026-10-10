@@ -15,6 +15,30 @@ contract every body signs.
 
 ## 1. The contract
 
+```mermaid
+flowchart TB
+    subgraph Shared["Shared across every body"]
+        Brain["Decider"]
+        Runner["Runner"]
+        Governor["Governor + policy"]
+        Trail["Provenance trail"]
+        Brain -->|proposed action| Runner
+        Runner -->|classify and govern| Governor
+        Governor -->|record verdict before action| Trail
+    end
+    Runner -->|Driver protocol| Contract{"Body"}
+    Contract --> Chromium["ChromiumDriver"]
+    Contract --> Fake["FakeDriver"]
+    Contract --> SimPhone["SimPhoneDriver"]
+    Contract --> Android["AndroidDriver"]
+    Contract -->|perception and result| Runner
+    Approval["Optional human approver"] -->|approve or deny| Runner
+```
+
+The body supplies perception and performs an action only after the shared
+Runner and Governor have handled it. Swapping bodies does not swap the
+brain, policy, approval gate, or trail.
+
 A body is any object implementing the **Driver protocol**
 (`ghost_hands.drivers.Driver`):
 
