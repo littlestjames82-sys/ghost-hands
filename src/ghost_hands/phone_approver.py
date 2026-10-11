@@ -51,6 +51,12 @@ TEST_SUMMARY = "Test approval from Ghost Hands — approving this runs nothing"
 
 _SUMMARY_CAP = 280
 
+#: v0.9.1: approval replies are tiny JSON objects. Cap the read so a
+#: hostile/compromised endpoint on the bridge port cannot exhaust
+#: memory while the approver sits in its poll loop.
+MAX_RESPONSE_BYTES = 1024 * 1024
+MAX_ERROR_BYTES = 256 * 1024
+
 
 def build_summary(
     action: Action,
@@ -253,10 +259,19 @@ class PhoneApprover:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.http_timeout) as resp:
-                raw = resp.read()
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise HandsError(
+                        "Android bridge approval response too large "
+                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
+                    )
                 status = resp.status
         except urllib.error.HTTPError as exc:
-            raw = exc.read() if exc.fp is not None else b""
+            raw = (
+                exc.read(MAX_ERROR_BYTES + 1)[:MAX_ERROR_BYTES]
+                if exc.fp is not None
+                else b""
+            )
             status = exc.code
             if status == 401:
                 raise HandsError(

@@ -31,7 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 from .actions import Action
 from .eyes import Element
@@ -272,8 +272,40 @@ class Governor:
                     )
 
         effective_url = action.url if action.kind == "navigate" else page_url
-        host = _hostname(effective_url)
-        if host:
+        # Domain rules apply to every host this action can actually
+        # reach — not just the page it starts on. A click follows the
+        # element's href (and a submit its form's action); a download
+        # fetches its URL. Before v0.9.1 only the starting host was
+        # checked, so a link on an allowed page to a blocked domain
+        # sailed through the allow/block lists.
+        candidate_urls: list[str] = []
+        if effective_url:
+            candidate_urls.append(effective_url)
+        if action.url and action.kind in ("navigate", "download"):
+            candidate_urls.append(action.url)
+        if element is not None:
+            # The element's own destinations, for the kinds that follow
+            # them: a click follows href (and may submit form_action);
+            # a download may fetch the element's href. Typing into a
+            # field navigates nowhere, so its form's action host is
+            # judged when a submit is actually attempted, not here.
+            dests: list[str] = []
+            if action.kind in ("click", "double_click", "right_click", "download"):
+                if element.href:
+                    dests.append(element.href)
+            if action.kind in ("click", "double_click"):
+                if element.form_action:
+                    dests.append(element.form_action)
+            for dest in dests:
+                candidate_urls.append(
+                    urljoin(page_url or "", dest) if page_url else dest
+                )
+        seen_hosts: set[str] = set()
+        for candidate in candidate_urls:
+            host = _hostname(candidate)
+            if not host or host in seen_hosts:
+                continue
+            seen_hosts.add(host)
             if host in policy.blocked_domains:
                 return Decision(
                     classification,

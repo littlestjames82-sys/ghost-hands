@@ -1135,6 +1135,43 @@ _VIEWPORT_PRESETS = {
 
 NET_EVENT_CAP = 200
 
+#: Schemes Chromium may be *navigated* to (open / open_tab / the
+#: navigate and download actions). Everything else — file:, chrome:,
+#: view-source:, javascript:, devtools:, … — is refused before the
+#: browser moves (v0.9.1). Before this check, a governed ``navigate``
+#: to ``file:///…`` was classified readonly and allowed, and a later
+#: ``extract`` would read the local file's text back to the decider:
+#: local-file disclosure through the perception channel. ``data:``
+#: stays allowed (the bench/tests drive fixtures through it) and
+#: ``about:`` covers about:blank.
+_NAVIGABLE_SCHEMES = ("http", "https", "data", "about")
+
+
+def _navigation_scheme(url: str) -> str:
+    """The scheme a browser would see in ``url``: browsers strip
+    ASCII whitespace/control characters before scheme parsing, so
+    the check does the same (``file\\t://`` must not slip past as
+    scheme-less). Returns "" for relative URLs, which resolve
+    against the current (already vetted) page."""
+    cleaned = "".join(ch for ch in str(url) if ord(ch) > 0x20)
+    head, sep, _ = cleaned.partition(":")
+    if not sep:
+        return ""
+    if "/" in head or "?" in head or "#" in head:
+        return ""
+    return head.lower()
+
+
+def _check_navigable(url: str) -> None:
+    scheme = _navigation_scheme(url)
+    if scheme and scheme not in _NAVIGABLE_SCHEMES:
+        raise HandsError(
+            f"refusing to navigate Chromium to a {scheme}:// URL — "
+            "only http/https (plus data:/about: for fixtures) are "
+            "navigable; local files and browser-internal pages are "
+            "never a destination"
+        )
+
 
 class ChromiumDriver:
     """A real Chromium driven by our own CDP client. Stdlib only.
@@ -1477,6 +1514,7 @@ class ChromiumDriver:
 
     # -- protocol -----------------------------------------------------------
     def open(self, url: str) -> None:
+        _check_navigable(url)
         self._launch()
         result: dict = {}
         try:
@@ -1589,8 +1627,15 @@ class ChromiumDriver:
         elif method == "Network.loadingFailed":
             self._net_pending.pop(params.get("requestId", ""), None)
         elif method == "Browser.downloadWillBegin":
+            # suggestedFilename is server/page-controlled. Reduce it
+            # to a bare name at ingestion (v0.9.1): a "../" path would
+            # otherwise make _await_download resolve — and report as
+            # "downloaded" — a pre-existing file outside the download
+            # directory.
+            raw_name = str(params.get("suggestedFilename", ""))
+            safe_name = Path(raw_name).name if raw_name else ""
             self._downloads[params.get("guid", "")] = {
-                "filename": params.get("suggestedFilename", ""),
+                "filename": safe_name,
                 "url": params.get("url", ""),
                 "state": "inProgress",
                 "bytes": 0,
@@ -1791,6 +1836,7 @@ class ChromiumDriver:
     def open_tab(self, url: str = "about:blank") -> int:
         """Open a new tab (its own CDP target + session) and switch to
         it. Returns the new tab's index."""
+        _check_navigable(url)
         self._launch()
         assert self._client is not None
         target = self._client.send("Target.createTarget", {"url": url})
@@ -1912,7 +1958,17 @@ class ChromiumDriver:
             "cookies": self.get_cookies(),
             "origins": {origin: {"localStorage": self.local_storage()}},
         }
-        Path(path).write_text(json.dumps(data, indent=2), encoding="utf-8")
+        # Session files are credentials (SECURITY.md says treat them
+        # that way): owner-only 0o600 from creation, and a
+        # pre-existing loose file is tightened, not just truncated
+        # (v0.9.1 — before this, the umask decided).
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(data, indent=2))
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
         return str(path)
 
     def load_session(self, path) -> dict:

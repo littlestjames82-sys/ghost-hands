@@ -40,6 +40,9 @@ PASS = "pass"
 WARN = "warn"
 FAIL = "fail"
 
+#: v0.9.1: cap on doctor's probe response bodies (see _http_get_json).
+_MAX_PROBE_BYTES = 1024 * 1024
+
 _SYMBOLS = {PASS: "✓", WARN: "!", FAIL: "✗"}
 
 #: The packs doctor loads to prove the pack registry is intact.
@@ -189,11 +192,22 @@ def _http_get_json(
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             status = resp.status
-            raw = resp.read()
+            # v0.9.1: health/status payloads are tiny; cap the read
+            # so a dead-or-hostile endpoint cannot make doctor haul
+            # an unbounded body into memory. Over-cap reads as "not
+            # a JSON object" below, which every caller reports as a
+            # failure row — never a hang or a crash.
+            raw = resp.read(_MAX_PROBE_BYTES + 1)
+            if len(raw) > _MAX_PROBE_BYTES:
+                raw = b""
     except urllib.error.HTTPError as exc:
         status = exc.code
         try:
-            raw = exc.read() if exc.fp is not None else b""
+            raw = (
+                exc.read(_MAX_PROBE_BYTES + 1)[:_MAX_PROBE_BYTES]
+                if exc.fp is not None
+                else b""
+            )
         except Exception:
             raw = b""
     except (urllib.error.URLError, OSError) as exc:

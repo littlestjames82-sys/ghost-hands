@@ -59,6 +59,12 @@ from . import __version__ as _pkg_version
 PROTOCOL_VERSION = "2024-11-05"
 SERVER_INFO = {"name": "ghost-hands", "version": _pkg_version}
 
+#: v0.9.1 hardening: one JSON-RPC line may be at most this long. The
+#: tools' payloads (an element map, a trail) are kilobytes; a peer
+#: streaming an unbounded line is a memory denial of service, not a
+#: client. Oversized lines get a JSON-RPC error and are skipped.
+MAX_LINE_BYTES = 16 * 1024 * 1024
+
 TOOLS = [
     {
         "name": "hands_perceive",
@@ -193,7 +199,25 @@ def _text(payload: str, is_error: bool = False) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": payload}], "isError": is_error}
 
 
+def _valid_pages(pages: Any) -> bool:
+    """A fake web is a {url: html} object with string values. Anything
+    else (a number, a list, nested objects) is a hostile or broken tool
+    argument — reject it here instead of letting a TypeError escape
+    the dispatcher and kill the server (v0.9.1)."""
+    return isinstance(pages, dict) and all(
+        isinstance(k, str) and isinstance(v, str) for k, v in pages.items()
+    )
+
+
 def _perceive(session: HandsSession, args: dict) -> dict:
+    if args.get("pages") is not None and not _valid_pages(args["pages"]):
+        return _text(
+            "ERROR: 'pages' must be an object mapping URL strings to "
+            "HTML strings.",
+            is_error=True,
+        )
+    if args.get("url") is not None and not isinstance(args.get("url"), str):
+        return _text("ERROR: 'url' must be a string.", is_error=True)
     if args.get("pages"):
         if session.driver_kind != "fake":
             return _text(
@@ -325,7 +349,20 @@ def _act(session: HandsSession, args: dict) -> dict:
 
 
 def _run(session: HandsSession, args: dict) -> dict:
+    if args.get("pages") is not None and not _valid_pages(args["pages"]):
+        return _text(
+            "ERROR: 'pages' must be an object mapping URL strings to "
+            "HTML strings.",
+            is_error=True,
+        )
     steps = args["steps"]
+    if not isinstance(steps, list) or not all(
+        isinstance(s, dict) for s in steps
+    ):
+        return _text(
+            "ERROR: 'steps' must be an array of action objects.",
+            is_error=True,
+        )
     kind = (args.get("driver") or session.driver_kind or "fake").strip().lower()
     if kind not in DRIVER_KINDS:
         return _text(
@@ -385,6 +422,19 @@ _TOOL_FUNCS = {
 def handle_request(session: HandsSession, msg: dict) -> Optional[dict]:
     """Handle one JSON-RPC message; returns a response dict, or None for
     notifications."""
+    if not isinstance(msg, dict):
+        # Valid JSON, wrong shape (a list, a string, a number): that is
+        # an invalid request, not a reason to crash the server (v0.9.1 —
+        # before this check, msg.get raised AttributeError and killed
+        # the stdio loop).
+        return {
+            "jsonrpc": "2.0",
+            "id": None,
+            "error": {
+                "code": -32600,
+                "message": "invalid request: expected a JSON-RPC object",
+            },
+        }
     method = msg.get("method", "")
     msg_id = msg.get("id")
     if method == "initialize":
@@ -404,8 +454,23 @@ def handle_request(session: HandsSession, msg: dict) -> Optional[dict]:
         return {"jsonrpc": "2.0", "id": msg_id, "result": {"tools": TOOLS}}
     if method == "tools/call":
         params = msg.get("params") or {}
+        if not isinstance(params, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "error": {"code": -32602, "message": "params must be an object"},
+            }
         name = params.get("name", "")
         args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            return {
+                "jsonrpc": "2.0",
+                "id": msg_id,
+                "error": {
+                    "code": -32602,
+                    "message": "tool arguments must be an object",
+                },
+            }
         func = _TOOL_FUNCS.get(name)
         if func is None:
             return {
@@ -415,7 +480,7 @@ def handle_request(session: HandsSession, msg: dict) -> Optional[dict]:
             }
         try:
             result = func(session, args)
-        except (HandsError, ValueError, KeyError) as exc:
+        except (HandsError, ValueError, KeyError, TypeError) as exc:
             result = _text(f"ERROR: {exc}", is_error=True)
         return {"jsonrpc": "2.0", "id": msg_id, "result": result}
     return {
@@ -440,6 +505,18 @@ def _serve_loop(session: HandsSession, stdin, stdout) -> None:
         line = line.strip()
         if not line:
             continue
+        if len(line) > MAX_LINE_BYTES:
+            response = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {
+                    "code": -32700,
+                    "message": "request too large",
+                },
+            }
+            stdout.write(json.dumps(response) + "\n")
+            stdout.flush()
+            continue
         try:
             msg = json.loads(line)
         except json.JSONDecodeError:
@@ -451,7 +528,17 @@ def _serve_loop(session: HandsSession, stdin, stdout) -> None:
             stdout.write(json.dumps(response) + "\n")
             stdout.flush()
             continue
-        response = handle_request(session, msg)
+        try:
+            response = handle_request(session, msg)
+        except Exception:
+            # A hostile or malformed message must never kill the
+            # server loop. The detail stays server-side: the reply is
+            # a generic internal error, not a traceback (v0.9.1).
+            response = {
+                "jsonrpc": "2.0",
+                "id": msg.get("id") if isinstance(msg, dict) else None,
+                "error": {"code": -32603, "message": "internal error"},
+            }
         if response is not None:
             stdout.write(json.dumps(response) + "\n")
             stdout.flush()

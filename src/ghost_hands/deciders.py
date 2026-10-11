@@ -202,6 +202,10 @@ _SYSTEM_PROMPT = (
 )
 
 
+#: v0.9.1: cap on a decider endpoint's response body (see decide()).
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+
+
 class OpenAICompatibleDecider:
     """One LLM decision pass per step, against any OpenAI-compatible
     endpoint. Reads GHOST_HANDS_BASE_URL / GHOST_HANDS_API_KEY /
@@ -256,7 +260,18 @@ class OpenAICompatibleDecider:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
+                # v0.9.1: a model endpoint's reply is one small JSON
+                # object. Cap the read — an unbounded one lets a
+                # hostile/compromised endpoint exhaust memory.
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise HandsError(
+                        "decider response too large "
+                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
+                    )
+                payload = json.loads(raw.decode("utf-8"))
+        except HandsError:
+            raise
         except Exception as exc:  # network or HTTP failure: fail honestly
             raise HandsError(f"decider request failed: {exc}") from exc
         try:

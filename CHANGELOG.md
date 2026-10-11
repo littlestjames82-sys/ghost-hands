@@ -6,6 +6,62 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [0.9.1] — 2026-10-11 (hardening patch; built + verified locally)
+
+A security-hardening patch over 0.9.0 — no new features, no new
+dependencies, governed-action semantics unchanged (classify → record
+→ approve → execute; timeouts and errors still always deny). Full
+audit detail, proofs, and cleared non-findings: `HARDENING_091.md`.
+New regression suite: `tests/test_hardening_091.py`.
+
+- **Replay-export injection (high).** `export.py` embedded element
+  names/hrefs — page-controlled strings — raw into `#` comments in
+  the graduated script. A newline in a name ended the comment and
+  the rest of the string became executable Python in a script the
+  user is meant to run. Descriptor comments now fold every control
+  character to a space, so a comment is always one physical line.
+- **Governor domain bypass (medium).** Domain allow/block lists
+  were checked only against the page an action *started* on, never
+  where it *went*: a click on a link to a blocked domain (or a
+  submit into one) was allowed from an allowed page. `evaluate()`
+  now also checks the target element's href (click/download kinds)
+  and form action (click kinds), resolved against the page URL.
+  Typing is unchanged — a field's form host is judged at submit.
+- **Chromium `file://` navigation (high).** Any scheme could be
+  navigated; a governed `navigate` to `file:///…` was readonly and
+  allowed, and a following `extract` read the local file's text
+  back to the decider. Chromium `open`/`open_tab` now refuse
+  anything but http/https (plus `data:`/`about:` for fixtures),
+  with browser-style whitespace stripping before the scheme check.
+- **MCP server robustness (medium).** Valid-JSON-but-wrong-shape
+  messages (a list, a string, non-object `params`/`arguments`,
+  `pages: 123`) raised uncaught `AttributeError`/`TypeError` and
+  killed the stdio server. They now get proper JSON-RPC errors
+  (-32600/-32602), tool arguments are type-validated, single lines
+  are capped at 16 MiB, and an unexpected handler error returns a
+  generic -32603 instead of a traceback — the loop always survives.
+- **BusClient validation + caps (medium).** Any urllib scheme was
+  accepted as a bus URL (`file://` turned bus calls into local
+  file reads) and a workspace id like `../../admin` rewrote the
+  request path out of its workspace. Base URLs must now be
+  http(s) with a host; workspace ids must be slugs. Response
+  bodies are capped (16 MiB; error bodies 256 KiB).
+- **Response caps everywhere (low).** The Android bridge client,
+  PhoneApprover, the OpenAI-compatible decider, and doctor's
+  probes all read response bodies unbounded; each now has a cap
+  sized to its largest legitimate payload, and the approver still
+  fails closed (oversize = denial, never consent).
+- **Download filename traversal (low).** A page-controlled CDP
+  `suggestedFilename` containing `../` was used verbatim to resolve
+  the downloaded file, so a "completed download" could name a
+  pre-existing file outside the download directory. Filenames are
+  reduced to their bare name at ingestion.
+- **Credential-file permissions (low).** Trail files (which record
+  typed text verbatim) and `save_session` files (cookies +
+  localStorage) were created with the process umask — group/world
+  readable on typical setups. Both are now created 0600, and a
+  pre-existing loose trail/session file is tightened on use.
+
 ## [0.9.0] — 2026-10-08 (built + verified locally; not published)
 
 The field kit wave: one command that diagnoses the whole stack, and

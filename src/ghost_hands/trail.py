@@ -16,6 +16,7 @@ account of what was about to happen.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -48,6 +49,15 @@ class Trail:
         self.events: list[dict[str, Any]] = []
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            if self.path.exists():
+                # A trail records typed text verbatim in its action
+                # records (passwords included — see evaluate.py's
+                # trail audit). It is a credential-bearing file:
+                # tighten a pre-existing loose one (v0.9.1).
+                try:
+                    os.chmod(self.path, 0o600)
+                except OSError:
+                    pass
 
     def record(self, event_type: str, step: int, **fields: Any) -> dict[str, Any]:
         if event_type not in EVENT_TYPES:
@@ -60,7 +70,13 @@ class Trail:
         event.update(fields)
         self.events.append(event)
         if self.path:
-            with self.path.open("a", encoding="utf-8") as fh:
+            # Owner-only from creation (0o600): before v0.9.1 the
+            # trail landed with the process umask — group/world
+            # readable on typical setups despite carrying typed text.
+            fd = os.open(
+                self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600
+            )
+            with os.fdopen(fd, "a", encoding="utf-8") as fh:
                 fh.write(json.dumps(event) + "\n")
         return event
 

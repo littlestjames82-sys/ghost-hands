@@ -252,7 +252,7 @@ def test_doctor_bus_down_fails():
 def test_doctor_runtime_and_packs_pass():
     rows = by_name(run_doctor(env={}))
     assert rows["runtime"].status == PASS
-    assert "ghost-hands 0.9.0" in rows["runtime"].detail
+    assert "ghost-hands 0.9.1" in rows["runtime"].detail
     assert rows["policy packs"].status == PASS
     for name in ("readonly", "standard", "strict", "seatbelt"):
         assert name in rows["policy packs"].detail
@@ -302,7 +302,7 @@ def test_doctor_json_schema_and_summary(bridge):
     checks = run_doctor(env=bridge_env(url))
     payload = doctor_payload(checks)
     assert payload["tool"] == "ghost-hands doctor"
-    assert payload["version"] == "0.9.0"
+    assert payload["version"] == "0.9.1"
     assert payload["ok"] is True
     names = [row["name"] for row in payload["checks"]]
     assert names == [

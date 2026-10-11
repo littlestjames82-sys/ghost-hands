@@ -26,12 +26,25 @@ Only urllib is used — zero dependencies, like everything here.
 from __future__ import annotations
 
 import json
+import re
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Optional
 
 from .errors import HandsError
+
+#: v0.9.1 hardening caps. A GhostBus reply is workspace JSON — tasks,
+#: messages, files (a run's trail is the biggest legitimate payload).
+#: 16 MiB is generous headroom; an unbounded read lets a hostile or
+#: compromised bus exhaust this process's memory with one reply.
+MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+MAX_ERROR_BYTES = 256 * 1024
+
+#: Hosted workspace ids are slugs. Anything else (``../``, ``/``,
+#: ``?``, ``#``) would let a workspace argument rewrite the request
+#: path — escaping the workspace prefix entirely (v0.9.1).
+_WORKSPACE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 
 class BusError(HandsError):
@@ -55,6 +68,20 @@ class BusClient:
         base = (base_url or "").rstrip("/")
         if not base:
             raise BusError("a GhostBus base URL is required")
+        # Only HTTP(S) buses exist. Before v0.9.1 any urllib scheme
+        # was accepted — file:// turned bus calls into local file
+        # reads, and exotic schemes behaved unpredictably.
+        parsed = urllib.parse.urlparse(base)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise BusError(
+                f"invalid GhostBus base URL {base_url!r} — expected "
+                "an http(s):// URL"
+            )
+        if workspace and not _WORKSPACE_RE.match(str(workspace)):
+            raise BusError(
+                f"invalid GhostBus workspace id {workspace!r} — "
+                "expected a slug of letters, digits, '-' and '_'"
+            )
         if workspace:
             base = f"{base}/w/{workspace}"
         self.base_url = base
@@ -91,9 +118,17 @@ class BusClient:
             with urllib.request.urlopen(
                 req, timeout=timeout or self.timeout
             ) as resp:
-                raw = resp.read().decode("utf-8")
+                raw_bytes = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw_bytes) > MAX_RESPONSE_BYTES:
+                    raise BusError(
+                        f"GhostBus {method} {path} reply exceeded "
+                        f"{MAX_RESPONSE_BYTES} bytes — refused"
+                    )
+                raw = raw_bytes.decode("utf-8")
         except urllib.error.HTTPError as exc:
-            raw = exc.read().decode("utf-8", "replace")
+            raw = exc.read(MAX_ERROR_BYTES + 1)[:MAX_ERROR_BYTES].decode(
+                "utf-8", "replace"
+            )
             message = raw
             try:
                 parsed = json.loads(raw)

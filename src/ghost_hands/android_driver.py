@@ -59,6 +59,11 @@ from .eyes import Element, ElementMap
 DEFAULT_BRIDGE_URL = "http://127.0.0.1:8378"
 BRIDGE_PROTOCOL = 1
 
+#: v0.9.1: response caps. The biggest legitimate bridge reply is a
+#: base64 PNG screenshot; 32 MiB is generous. Error bodies are text.
+MAX_RESPONSE_BYTES = 32 * 1024 * 1024
+MAX_ERROR_BYTES = 256 * 1024
+
 #: Global actions the bridge performs via the accessibility service.
 SUPPORTED_PRESS_KEYS = ("Back", "Home", "Recents", "Notifications", "QuickSettings")
 
@@ -178,9 +183,19 @@ class AndroidDriver:
         )
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read()
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise HandsError(
+                        "Android bridge response too large "
+                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused; "
+                        "is something else on that port?"
+                    )
         except urllib.error.HTTPError as exc:
-            raw = exc.read() if exc.fp is not None else b""
+            raw = (
+                exc.read(MAX_ERROR_BYTES + 1)[:MAX_ERROR_BYTES]
+                if exc.fp is not None
+                else b""
+            )
             detail = ""
             try:
                 detail = str(json.loads(raw.decode("utf-8")).get("error", ""))

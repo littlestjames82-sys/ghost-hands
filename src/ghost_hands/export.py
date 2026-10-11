@@ -23,16 +23,34 @@ import json
 from typing import Any, Optional
 
 
+def _comment_safe(value: object) -> str:
+    """Make a page-derived string safe to embed in a ``#`` comment.
+
+    Element names/hrefs come from the page — attacker-shaped data. A
+    newline in a name would end the comment and turn the rest of the
+    string into *executable Python* in the graduated script, so every
+    control character (newlines first of all) is folded to a space.
+    The comment stays one physical line, always."""
+    return "".join(
+        ch if (ord(ch) >= 32 and ord(ch) != 127) else " "
+        for ch in str(value or "")
+    )
+
+
 def _descriptor_comment(element: dict | None) -> str:
     if not element:
         return ""
-    bits = [f"[{element.get('number')}] <{element.get('tag')}> \"{element.get('name')}\""]
+    bits = [
+        f"[{_comment_safe(element.get('number'))}] "
+        f"<{_comment_safe(element.get('tag'))}> "
+        f"\"{_comment_safe(element.get('name'))}\""
+    ]
     if element.get("type"):
-        bits.append(f"type={element['type']}")
+        bits.append(f"type={_comment_safe(element['type'])}")
     if element.get("href"):
-        bits.append(f"href={element['href']}")
+        bits.append(f"href={_comment_safe(element['href'])}")
     if element.get("id"):
-        bits.append(f"id={element['id']}")
+        bits.append(f"id={_comment_safe(element['id'])}")
     return "  # " + " ".join(bits)
 
 

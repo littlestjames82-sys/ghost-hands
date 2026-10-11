@@ -44,6 +44,15 @@ printed) and ``ghost-hands phone-proof`` (the guided on-device
 proof: configuration, adb forward, bridge status, the harmless
 test approval, and a summary of what is now proven — exit codes
 0 proven / 1 error / 2 needs-setup / 3 not approved).
+
+v0.9.1 is a hardening patch (see HARDENING_091.md): replay-export
+comments can no longer be broken out of by page-derived text; the
+Governor's domain lists now cover a target's own destination;
+Chromium refuses non-http(s) navigation schemes (file:// and
+friends); the MCP server survives hostile message shapes; the bus
+client validates its URL/workspace and caps replies; every HTTP
+client caps response bodies; and trail + session files are
+created owner-only (0600).
 """
 
 from .actions import Action
@@ -65,7 +74,7 @@ from .runner import RunReport, Runner
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 
 __all__ = [
     "Action",
