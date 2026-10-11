@@ -6,6 +6,10 @@
 [![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0)
 [![CI](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml)
 
+<p align="center">
+  <img src="docs/social-preview.png" alt="Ghost Hands — governed, recorded, replayable agent hands" width="760">
+</p>
+
 **Playwright drives. Stagehand thinks. Browser Use wanders. Ghost Hands answers for every move.**
 
 Ghost Hands is a standalone, zero-dependency Python package that gives an
@@ -31,6 +35,16 @@ MIT licensed.
 > with `pip install ghost-hands`, see the
 > [GitHub release](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0),
 > or browse the [project site](https://littlestjames82-sys.github.io/ghost-hands/).
+
+[Quickstart](#quickstart) · [How it works](#how-it-works) · [Body Protocol](docs/BODY_PROTOCOL.md) · [Security](SECURITY.md) · [Project site](https://littlestjames82-sys.github.io/ghost-hands/)
+
+## Quickstart
+
+```bash
+pip install ghost-hands
+ghost-hands demo   # try a governed run; no browser needed
+ghost-hands bench  # run the offline verification suite
+```
 
 ## What's new in 0.9.0
 
@@ -362,15 +376,7 @@ drives it with approvals on the phone itself.
   actually *executes* a graduated script against fixture pages on real
   Chromium and checks its completion marker.
 
-## Quickstart
-
-```bash
-pip install ghost-hands        # PyPI: ghost-hands 0.9.0
-ghost-hands demo               # scripted run over a built-in fake mini-web — no browser needed
-ghost-hands bench              # the verification suite
-```
-
-Drive a real page:
+## Drive a real page
 
 ```python
 from ghost_hands import ChromiumDriver, Runner, ScriptedDecider
