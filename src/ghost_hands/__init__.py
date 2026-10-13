@@ -53,6 +53,12 @@ friends); the MCP server survives hostile message shapes; the bus
 client validates its URL/workspace and caps replies; every HTTP
 client caps response bodies; and trail + session files are
 created owner-only (0600).
+
+v0.9.2 is a metadata patch: every tool the MCP server serves now
+declares the full annotation hint set (readOnlyHint /
+destructiveHint / idempotentHint / openWorldHint), as flagged by
+the M8ven Trust Index listing review, so MCP hosts can warn users
+before invoking the state-changing tools. No functional changes.
 """
 
 from .actions import Action
@@ -74,7 +80,7 @@ from .runner import RunReport, Runner
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"
 
 __all__ = [
     "Action",

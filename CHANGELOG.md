@@ -6,6 +6,22 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [0.9.2] — 2026-10-13 (metadata patch)
+
+A metadata-only patch over 0.9.1 — no functional changes, no new
+dependencies, governed-action semantics unchanged.
+
+- **MCP tool annotation hints.** All four tools served by the MCP
+  server (`hands_perceive`, `hands_act`, `hands_run`, `hands_trail`)
+  now declare the full annotation set — `readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint` — so MCP
+  hosts can warn users before invoking a state-changing tool. The
+  perceive/trail tools are marked read-only and idempotent; the
+  act/run tools are marked destructive and non-idempotent. Added
+  after the M8ven Trust Index flagged the missing hints in its
+  listing review of ghost-hands. New regression test:
+  `tests/test_mcp.py::test_tools_list_annotations`.
+
 ## [0.9.1] — 2026-10-11 (hardening patch; built + verified locally)
 
 A security-hardening patch over 0.9.0 — no new features, no new
