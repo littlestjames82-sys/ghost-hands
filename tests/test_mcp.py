@@ -37,6 +37,44 @@ def test_tools_list():
     assert names == ["hands_perceive", "hands_act", "hands_run", "hands_trail"]
 
 
+def test_tools_list_annotations():
+    """Every tool declares all four MCP annotation hints as booleans,
+    with values matching each handler's real behaviour."""
+    resp = call(HandsSession(), "tools/list")
+    expected = {
+        "hands_perceive": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
+        "hands_act": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+        "hands_run": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
+        "hands_trail": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    }
+    tools = resp["result"]["tools"]
+    assert {t["name"] for t in tools} == set(expected)
+    for tool in tools:
+        annotations = tool.get("annotations")
+        assert annotations == expected[tool["name"]]
+        assert all(isinstance(v, bool) for v in annotations.values())
+
+
 def test_unknown_method_error():
     resp = call(HandsSession(), "nope/nope")
     assert resp["error"]["code"] == -32601

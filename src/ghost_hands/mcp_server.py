@@ -65,6 +65,11 @@ SERVER_INFO = {"name": "ghost-hands", "version": _pkg_version}
 #: client. Oversized lines get a JSON-RPC error and are skipped.
 MAX_LINE_BYTES = 16 * 1024 * 1024
 
+#: Tool annotations (MCP ToolAnnotations): all four hints are declared
+#: explicitly on every tool, with values that match each handler's real
+#: behaviour — perceive/trail only observe (trail reads local session
+#: state only, hence openWorldHint False), act/run execute actions on
+#: pages and can change or destroy state outside this process.
 TOOLS = [
     {
         "name": "hands_perceive",
@@ -76,6 +81,12 @@ TOOLS = [
                 "pages": {"type": "object"},
             },
         },
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": True,
+        },
     },
     {
         "name": "hands_act",
@@ -84,6 +95,12 @@ TOOLS = [
             "type": "object",
             "properties": {"action": {"type": "object"}},
             "required": ["action"],
+        },
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
         },
     },
     {
@@ -101,11 +118,23 @@ TOOLS = [
             },
             "required": ["steps"],
         },
+        "annotations": {
+            "readOnlyHint": False,
+            "destructiveHint": True,
+            "idempotentHint": False,
+            "openWorldHint": True,
+        },
     },
     {
         "name": "hands_trail",
         "description": "Return this session's trail events and per-run accounting.",
         "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
     },
 ]
 
