@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0)
 [![CI](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml)
-[![M8ven Score](https://m8ven.ai/badge/mcp/littlestjames82-sys-ghost-hands-1e0iwl?v=6d2e88ac7074fedcf703bc99b3568534)](https://m8ven.ai/mcp/littlestjames82-sys-ghost-hands-1e0iwl?s=readme)
+[![M8ven Score](https://m8ven.ai/badge/mcp/littlestjames82-sys-ghost-hands-1e0iwl)](https://m8ven.ai/mcp/littlestjames82-sys-ghost-hands-1e0iwl?s=readme)
 
 **Playwright drives. Stagehand thinks. Browser Use wanders. Ghost Hands answers for every move.**
 
