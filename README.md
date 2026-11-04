@@ -3,9 +3,8 @@
 [![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0)
+[![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.3.0)
 [![CI](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml)
-[![M8ven Score](https://m8ven.ai/badge/mcp/littlestjames82-sys-ghost-hands-1e0iwl)](https://m8ven.ai/mcp/littlestjames82-sys-ghost-hands-1e0iwl?s=readme)
 
 **Playwright drives. Stagehand thinks. Browser Use wanders. Ghost Hands answers for every move.**
 
@@ -26,12 +25,13 @@ browser; we did not write a browser engine and don't claim to have.)
 From [Ghost Developer Studio](https://github.com/littlestjames82-sys).
 MIT licensed.
 
-> Status: **v0.9.0** — the field kit wave (`ghost-hands doctor` stack
-> diagnostics + `ghost-hands phone-proof`, the guided on-device proof).
-> Install it from [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
-> with `pip install ghost-hands`, see the
-> [GitHub release](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0),
-> or browse the [project site](https://littlestjames82-sys.github.io/ghost-hands/).
+MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
+
+> Status: v0.9.3 — live on PyPI and GitHub:
+> [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
+> (`pip install ghost-hands`) ·
+> [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
+> [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
 
 ## What's new in 0.9.0
 
@@ -366,7 +366,7 @@ drives it with approvals on the phone itself.
 ## Quickstart
 
 ```bash
-pip install ghost-hands        # PyPI: ghost-hands 0.9.0
+pip install ghost-hands        # (once published; for now: pip install . from a checkout)
 ghost-hands demo               # scripted run over a built-in fake mini-web — no browser needed
 ghost-hands bench              # the verification suite
 ```
@@ -578,7 +578,7 @@ What is proven, and what is not — as of v0.6.0 (Oct 8, 2026):
 
 **Links:** [PyPI](https://pypi.org/project/ghost-hands/) ·
 [Site](https://littlestjames82-sys.github.io/ghost-hands/) ·
-[Release v0.9.0](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.9.0) ·
+[Release v0.3.0](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.3.0) ·
 [CHANGELOG.md](CHANGELOG.md) · [LAUNCH.md](LAUNCH.md)
 
 - `src/ghost_hands/` — the package, one module per layer: `eyes`
@@ -607,19 +607,6 @@ What is proven, and what is not — as of v0.6.0 (Oct 8, 2026):
   `.github/workflows/pages.yml`.
 - `LAUNCH.md` — the launch runbook and copy pack, as written at launch.
 - `PLAN.md` — the field survey and design notes the build started from.
-
-## From Ghost Developer Studio
-
-Ghost Hands is one part of the studio's agent-infrastructure family:
-
-- **Visual roadmap board** — where every studio product stands, in one picture: [ghost-roadmaps](https://github.com/littlestjames82-sys/ghost-roadmaps)
-- **GhostGuard** — the governance layer for autonomous systems: [ghostguard](https://github.com/littlestjames82-sys/ghostguard)
-- **GhostBus** — agent-to-agent message bus and shared workspace, exposed as an MCP server: [ghostbus](https://github.com/littlestjames82-sys/ghostbus)
-- **Ghost Bridge** — MCP bridge + self-hostable relay for handing tasks to a personal agent, with scoped keys and approvals: [ghost-bridge](https://github.com/littlestjames82-sys/ghost-bridge)
-- **Agent Seatbelt** — deterministic guardrails that gate what an AI coding agent does before it does it: [agent-seatbelt](https://github.com/littlestjames82-sys/agent-seatbelt)
-- **Ghost Developer Studio storefront** — [storefront](https://github.com/littlestjames82-sys/storefront)
-
-Built in public by Ryan Cotten / Ghost Developer Studio.
 
 ## License
 

@@ -59,6 +59,11 @@ declares the full annotation hint set (readOnlyHint /
 destructiveHint / idempotentHint / openWorldHint), as flagged by
 the M8ven Trust Index listing review, so MCP hosts can warn users
 before invoking the state-changing tools. No functional changes.
+
+v0.9.3 is a discoverability patch: the README now carries the
+mcp-name ownership marker the official MCP Registry requires for
+PyPI packages, so Ghost Hands can be listed there under
+io.github.littlestjames82-sys/ghost-hands. No functional changes.
 """
 
 from .actions import Action
@@ -80,7 +85,7 @@ from .runner import RunReport, Runner
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail
 
-__version__ = "0.9.2"
+__version__ = "0.9.3"
 
 __all__ = [
     "Action",

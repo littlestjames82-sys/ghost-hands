@@ -6,6 +6,17 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [0.9.3] — 2026-11-04 (discoverability patch)
+
+A metadata-only patch over 0.9.2 — no functional changes, no new
+dependencies, governed-action semantics unchanged.
+
+- **MCP Registry ownership marker.** The README now carries the
+  `mcp-name: io.github.littlestjames82-sys/ghost-hands` line the
+  official MCP Registry requires to verify ownership of a PyPI
+  package, enabling the Ghost Hands listing there. The registry
+  manifest (`server.json`) moves to 0.9.3 alongside.
+
 ## [0.9.2] — 2026-10-13 (metadata patch)
 
 A metadata-only patch over 0.9.1 — no functional changes, no new
