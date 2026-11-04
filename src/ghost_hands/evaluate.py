@@ -580,18 +580,23 @@ class StubPolicy:
         self.goal_words = _keywords(goal)
         self.pairs = [
             (key.strip(), value.strip())
-            for key, value in re.findall(r"([A-Za-z][A-Za-z ]*?)=([^,.]+)", goal)
+            for key, value in re.findall(r"([A-Za-z][A-Za-z ]{0,40}?)=([^,.]+)", goal)
         ]
         creds = re.search(
             r"username\s+([^\s,.]+)\s+and\s+password\s+([^\s,.]+)", goal
         )
         self.creds = (creds.group(1), creds.group(2)) if creds else None
-        query = re.search(r"search[^'\"]*['\"]([^'\"]+)['\"]", goal, re.I)
+        query = None
+        _search_at = re.search(r"search", goal, re.I)
+        if _search_at:
+            _quoted = re.search(r"['\"]([^'\"]+)['\"]", goal[_search_at.end():])
+            if _quoted:
+                query = _quoted
         if not query:
             query = re.search(r"search for ([a-z0-9 ]+)", goal, re.I)
         self.query = query.group(1).strip() if query else None
         typeinto = re.search(
-            r"type\s+'([^']+)'\s+into\s+the\s+([A-Za-z ]+?)\s+field", goal, re.I
+            r"type\s+'([^']+)'\s+into\s+the\s+([A-Za-z]+(?: +[A-Za-z]+)*)\s+field", goal, re.I
         )
         self.typeinto = (
             (typeinto.group(1), typeinto.group(2).strip()) if typeinto else None
