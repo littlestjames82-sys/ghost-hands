@@ -73,12 +73,12 @@ MAX_LINE_BYTES = 16 * 1024 * 1024
 TOOLS = [
     {
         "name": "hands_perceive",
-        "description": "Open a URL (or install a fake web via 'pages') and return the numbered element map.",
+        "description": "Look at a page before touching it: open a URL on the session's browser body (or install a fake web via 'pages') and return the numbered element map, where every interactive element is listed with a number. Those numbers are the only valid targets for hands_act. Perceiving never clicks or types anything; use hands_act for a single governed action, or hands_run to execute a whole scripted sequence.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string"},
-                "pages": {"type": "object"},
+                "url": {"type": "string", "description": "The page to open and map. Omit it when installing a fake web via 'pages' (the fake web's start page is used)."},
+                "pages": {"type": "object", "description": "A fake web to install instead of opening a real URL: an object mapping page names to page definitions (the demo/testing body). Mutually exclusive with browsing a live site."},
             },
         },
         "annotations": {
@@ -90,10 +90,10 @@ TOOLS = [
     },
     {
         "name": "hands_act",
-        "description": "Perform one governed action (e.g. {\"kind\":\"click\",\"target\":3}) on the perceived page. Consequential actions are denied without an approver (or decided by the phone when GHOST_HANDS_APPROVER=phone); the response states which channel decided.",
+        "description": "Perform ONE governed action (e.g. {\"kind\":\"click\",\"target\":3}) on the most recently perceived page. Every action is classified before it runs (readonly / write / consequential) and recorded in the provenance trail before it executes. Consequential actions are denied without an approver (or decided by the phone when GHOST_HANDS_APPROVER=phone); the response states which channel decided. Call hands_perceive first: action targets are the element numbers from its map. For several actions in a row, use hands_run instead.",
         "inputSchema": {
             "type": "object",
-            "properties": {"action": {"type": "object"}},
+            "properties": {"action": {"type": "object", "description": "The action to perform, as an object with at least a 'kind' (for example click, type, navigate, scroll) plus its operands, such as 'target' (an element number from the last perceived map) or 'text' for typing."}},
             "required": ["action"],
         },
         "annotations": {
@@ -105,16 +105,16 @@ TOOLS = [
     },
     {
         "name": "hands_run",
-        "description": "Run scripted steps through the governed Runner. driver: 'fake', 'chromium', 'simphone' or 'android' (default: the session body, GHOST_HANDS_DRIVER).",
+        "description": "Run a whole scripted sequence of steps through the governed Runner in one call: each step is perceived, classified, approved under the same governor as hands_act, executed, and written to the trail. Use this for a deterministic multi-step job (the shape a recorded trail exports as a replayable script); use hands_perceive + hands_act when you want to decide each action interactively. driver: 'fake', 'chromium', 'simphone' or 'android' (default: the session body, GHOST_HANDS_DRIVER).",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "steps": {"type": "array"},
-                "pages": {"type": "object"},
-                "start_url": {"type": "string"},
-                "driver": {"type": "string"},
-                "goal": {"type": "string"},
-                "approve_all": {"type": "boolean"},
+                "steps": {"type": "array", "description": "The steps to execute in order. Each step is an action object like hands_act takes, optionally preceded by perceive steps; the Runner stops according to the session's stop rules and reports why."},
+                "pages": {"type": "object", "description": "A fake web to install for this run (same shape as hands_perceive's 'pages'). Used with driver 'fake'."},
+                "start_url": {"type": "string", "description": "Page to open before the first step runs."},
+                "driver": {"type": "string", "description": "Which body executes the run: 'fake' (built-in demo web), 'chromium' (real browser), 'simphone' or 'android' (phone bodies). Defaults to the session body from GHOST_HANDS_DRIVER."},
+                "goal": {"type": "string", "description": "A short statement of what the run is trying to achieve. Recorded in the trail as the run's purpose."},
+                "approve_all": {"type": "boolean", "description": "When true, approval-gated steps in this run are approved without asking the approver channel. Only set it when the operator has explicitly authorized the whole run."},
             },
             "required": ["steps"],
         },
@@ -127,7 +127,7 @@ TOOLS = [
     },
     {
         "name": "hands_trail",
-        "description": "Return this session's trail events and per-run accounting.",
+        "description": "Return this session's provenance trail: every decision and action recorded before execution, in order, with per-run accounting (steps, actions by class, stop reason). Read-only and local to this server session. Use it to audit what the hands actually did, or as the source for exporting a replayable script.",
         "inputSchema": {"type": "object", "properties": {}},
         "annotations": {
             "readOnlyHint": True,
