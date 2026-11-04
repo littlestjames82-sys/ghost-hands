@@ -209,7 +209,14 @@ class GhostGuardGovernor:
         node: Optional[str] = None,
         timeout: float = 15.0,
     ) -> None:
-        self.policy = policy if policy is not None else default_policy_doc()
+        # The default policy loads lazily, on first use through the
+        # policy property below — constructing a governor must not
+        # raise just because the sibling GhostGuard checkout is not
+        # there (a standalone checkout, CI). A missing policy then
+        # surfaces inside gate() as a GhostGuardBridgeError, which
+        # evaluate() already converts to a deny: fail closed, exactly
+        # as this module's header promises.
+        self._policy = policy
         self.policy_overlay = policy_overlay
         self.bridge_path = (
             Path(bridge_path) if bridge_path is not None else default_bridge_path()
@@ -229,6 +236,21 @@ class GhostGuardGovernor:
         #: Hosts that want the canonical record — rule id, routing —
         #: beyond the Decision's reason can read it here.
         self.last_record: Optional[dict[str, Any]] = None
+
+    @property
+    def policy(self) -> dict[str, Any]:
+        """The base policy document. When the constructor was not
+        given one, the default loads here, on first use — and a
+        missing or unreadable policy file raises
+        GhostGuardBridgeError at this point (inside gate(), where
+        evaluate() turns it into a deny), never at construction."""
+        if self._policy is None:
+            self._policy = default_policy_doc()
+        return self._policy
+
+    @policy.setter
+    def policy(self, value: Optional[dict[str, Any]]) -> None:
+        self._policy = value
 
     # -- the bridge ----------------------------------------------------
 
