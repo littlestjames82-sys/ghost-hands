@@ -64,6 +64,12 @@ v0.9.3 is a discoverability patch: the README now carries the
 mcp-name ownership marker the official MCP Registry requires for
 PyPI packages, so Ghost Hands can be listed there under
 io.github.littlestjames82-sys/ghost-hands. No functional changes.
+
+v0.9.4 is a directory-quality patch: the MCP server now publishes
+server instructions in the initialize result, and the four tool
+descriptions are fuller, written for directory tool-definition
+scoring. CI dependency bumps ride along. No tool, classification,
+or approval behaviour changes.
 """
 
 from .actions import Action
@@ -85,7 +91,7 @@ from .runner import RunReport, Runner
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail
 
-__version__ = "0.9.3"
+__version__ = "0.9.4"
 
 __all__ = [
     "Action",

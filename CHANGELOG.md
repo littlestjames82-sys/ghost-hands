@@ -6,7 +6,7 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased]
+## [0.9.4] — 2026-11-09 (directory-quality patch)
 
 - **MCP server instructions.** The initialize result now publishes
   server instructions (`SERVER_INSTRUCTIONS` in `mcp_server.py`):
@@ -16,10 +16,22 @@ README's "Honest status" for what remains unproven at each step.
   that Glama's schema page for ghost-hands recorded as empty.
   No tool, classification, or approval behaviour changes. New
   regression test: `tests/test_mcp.py::test_initialize_instructions`.
+- **Fuller tool descriptions.** All four MCP tools and every
+  parameter carry fuller descriptions written for directory
+  tool-definition scoring: what each tool does, when to call it,
+  and what it changes. Tool schemas, classification, and approval
+  behaviour are unchanged.
 - **Test fix (busagent hosted test).** `test_hosted_workspace_prefix_end_to_end`
   used a 9-character GhostBus admin key; the GhostBus hosted server
   now requires at least 16 characters and exited at boot, so the
   test timed out on health. The test key is now 25 characters.
+- **Dependency bumps.** GitHub Actions dependencies updated via
+  Dependabot (CI, CodeQL, and the publish workflow). The package
+  itself remains stdlib-only, with no runtime dependencies.
+- **README: per-client MCP setup.** The README gained a
+  "Use it in your MCP client" section with copy-paste
+  configuration for Claude Desktop, Claude Code, Cursor,
+  VS Code, Cline, and Codex. Documentation only.
 
 ## [0.9.3] — 2026-11-04 (discoverability patch)
 
