@@ -341,7 +341,10 @@ def test_hosted_workspace_prefix_end_to_end(tmp_path):
     from ghost_hands.busclient import BusError
 
     port = _free_port()
-    env = dict(os.environ, GHOSTBUS_ADMIN_KEY="admin-key")
+    # GhostBus's hosted server now requires an admin key of at least
+    # 16 characters; the old 9-char "admin-key" made it exit at boot
+    # and this test timed out waiting for health.
+    env = dict(os.environ, GHOSTBUS_ADMIN_KEY="admin-key-test-0123456789")
     proc = subprocess.Popen(
         [
             shutil.which("node"),
@@ -362,7 +365,7 @@ def test_hosted_workspace_prefix_end_to_end(tmp_path):
         req = urllib.request.Request(
             base + "/api/workspaces",
             data=json.dumps({"id": "hands-test", "name": "Hands Test"}).encode(),
-            headers={"Content-Type": "application/json", "x-bus-key": "admin-key"},
+            headers={"Content-Type": "application/json", "x-bus-key": "admin-key-test-0123456789"},
             method="POST",
         )
         with urllib.request.urlopen(req, timeout=10) as resp:

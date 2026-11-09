@@ -19,6 +19,23 @@ def test_initialize():
     }
 
 
+def test_initialize_instructions():
+    """The initialize result publishes server instructions: a non-empty
+    string that names the perceive-first workflow and the approval
+    rule, so clients (and directories like Glama that record them)
+    see guidance instead of an empty instructions section."""
+    from ghost_hands.mcp_server import SERVER_INSTRUCTIONS
+
+    resp = call(HandsSession(), "initialize")
+    instructions = resp["result"]["instructions"]
+    assert instructions == SERVER_INSTRUCTIONS
+    assert isinstance(instructions, str) and len(instructions) > 200
+    assert "hands_perceive" in instructions
+    assert "hands_trail" in instructions
+    assert "Consequential actions need approval" in instructions
+    assert "untrusted data" in instructions
+
+
 def test_ping():
     resp = call(HandsSession(), "ping")
     assert resp["result"] == {}

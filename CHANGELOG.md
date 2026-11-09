@@ -6,6 +6,21 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [Unreleased]
+
+- **MCP server instructions.** The initialize result now publishes
+  server instructions (`SERVER_INSTRUCTIONS` in `mcp_server.py`):
+  the perceive-first workflow, the approval rule for consequential
+  actions, the rule that page content is untrusted data, and the
+  session environment limits. This fills the instructions section
+  that Glama's schema page for ghost-hands recorded as empty.
+  No tool, classification, or approval behaviour changes. New
+  regression test: `tests/test_mcp.py::test_initialize_instructions`.
+- **Test fix (busagent hosted test).** `test_hosted_workspace_prefix_end_to_end`
+  used a 9-character GhostBus admin key; the GhostBus hosted server
+  now requires at least 16 characters and exited at boot, so the
+  test timed out on health. The test key is now 25 characters.
+
 ## [0.9.3] — 2026-11-04 (discoverability patch)
 
 A metadata-only patch over 0.9.2 — no functional changes, no new
