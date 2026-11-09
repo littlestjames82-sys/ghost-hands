@@ -387,6 +387,123 @@ print(report.stop_reason, report.summary)
 driver.close()
 ```
 
+## Use it in your MCP client
+
+The MCP server runs on stdio as `ghost-hands mcp`; install it first with
+`pip install ghost-hands`. It exposes four tools: `hands_perceive`,
+`hands_act`, `hands_run`, and `hands_trail`. The server reads its
+configuration from environment variables, once per process:
+`GHOST_HANDS_DRIVER` (`fake`, `chromium`, `simphone`, or `android`;
+default `fake`), `GHOST_HANDS_POLICY` (a policy pack name; default
+`standard`), and `GHOST_HANDS_APPROVER` (set to `phone` to route "ask"
+verdicts to the phone approver; without an approver, asks are denied
+with an explanation). `GHOST_HANDS_START_URL` opens a page on the first
+perceive, and android sessions also read `GHOST_HANDS_ANDROID_BRIDGE`
+and `GHOST_HANDS_ANDROID_TOKEN`. Every client below launches the same
+command with the same environment; only the wrapper format changes.
+
+### Claude Desktop
+
+Add to `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "ghost-hands": {
+      "command": "ghost-hands",
+      "args": ["mcp"],
+      "env": {
+        "GHOST_HANDS_DRIVER": "chromium",
+        "GHOST_HANDS_APPROVER": "phone",
+        "GHOST_HANDS_POLICY": "standard"
+      }
+    }
+  }
+}
+```
+
+### Claude Code
+
+```bash
+claude mcp add ghost-hands -e GHOST_HANDS_DRIVER=chromium -e GHOST_HANDS_APPROVER=phone -e GHOST_HANDS_POLICY=standard -- ghost-hands mcp
+```
+
+### Cursor
+
+Add to `.cursor/mcp.json` in a project, or `~/.cursor/mcp.json` for all
+projects:
+
+```json
+{
+  "mcpServers": {
+    "ghost-hands": {
+      "command": "ghost-hands",
+      "args": ["mcp"],
+      "env": {
+        "GHOST_HANDS_DRIVER": "chromium",
+        "GHOST_HANDS_APPROVER": "phone",
+        "GHOST_HANDS_POLICY": "standard"
+      }
+    }
+  }
+}
+```
+
+### VS Code
+
+Add to `.vscode/mcp.json`:
+
+```json
+{
+  "servers": {
+    "ghost-hands": {
+      "command": "ghost-hands",
+      "args": ["mcp"],
+      "env": {
+        "GHOST_HANDS_DRIVER": "chromium",
+        "GHOST_HANDS_APPROVER": "phone",
+        "GHOST_HANDS_POLICY": "standard"
+      }
+    }
+  }
+}
+```
+
+### Cline
+
+Add to `cline_mcp_settings.json`:
+
+```json
+{
+  "mcpServers": {
+    "ghost-hands": {
+      "command": "ghost-hands",
+      "args": ["mcp"],
+      "env": {
+        "GHOST_HANDS_DRIVER": "chromium",
+        "GHOST_HANDS_APPROVER": "phone",
+        "GHOST_HANDS_POLICY": "standard"
+      }
+    }
+  }
+}
+```
+
+### Codex
+
+Add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.ghost-hands]
+command = "ghost-hands"
+args = ["mcp"]
+
+[mcp_servers.ghost-hands.env]
+GHOST_HANDS_DRIVER = "chromium"
+GHOST_HANDS_APPROVER = "phone"
+GHOST_HANDS_POLICY = "standard"
+```
+
 ## How it works
 
 | Layer | What it does |
