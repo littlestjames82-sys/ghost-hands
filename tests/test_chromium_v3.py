@@ -552,7 +552,11 @@ def test_wait_timeout_recorded_honestly_in_trail():
             {"kind": "wait", "text": "Ghost text that never comes", "seconds": 1},
             {"kind": "done", "summary": "unreached"},
         ]
-        runner = Runner(driver, ScriptedDecider(steps), trail=trail)
+        # Error recovery off: this test pins the terminal stop itself.
+        runner = Runner(
+            driver, ScriptedDecider(steps), trail=trail,
+            error_recovery_attempts=0,
+        )
         report = runner.run("wait for the impossible")
         assert report.stop_reason == "error", report.summary
         failures = [e for e in trail.events if e["type"] == "result" and not e["ok"]]

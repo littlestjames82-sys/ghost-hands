@@ -53,6 +53,10 @@ EVENT_TYPES = (
     # v1.3: a stuck run used its recovery chance instead of stopping.
     # Fields: reason, attempt.
     "recovery",
+    # v1.10: a step failed terminally (heal chain exhausted, driver
+    # raised) and the run spent an error-recovery chance instead of
+    # stopping. Fields: error, attempt.
+    "error_recovery",
 )
 
 GENESIS = "genesis"

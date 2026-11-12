@@ -6,7 +6,23 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.9 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.10 in development (on GitHub main; release is Ryan's gate)
+
+The never-give-up release (v1.10 wave):
+
+- **Heal chains.** The self-healing retry that used to fire
+  exactly once per step is now a chain: `heal_attempts`
+  (default 2) re-perceives and retries a moved element at
+  its fresh number, one `heal` trail event per attempt.
+  `heal_attempts=1` reproduces the old behavior exactly;
+  0 disables healing.
+- **Error-to-loop recovery.** When a step fails terminally
+  and `error_recovery_attempts` (default 1) remains, the
+  run no longer dies: an `error_recovery` trail event
+  records the error, the decider is told what failed and
+  given a fresh perception, and the run continues.
+  Governance denials and budget stops never recover.
+  Runs report `heals` and `error_recoveries` counts.
 
 The integration-surface release (v1.9 wave):
 

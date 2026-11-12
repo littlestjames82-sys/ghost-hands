@@ -11,9 +11,22 @@ Self-healing (v0.2): if a targeted action fails because its element moved
 or changed between perception and execution (the drivers raise a
 "target mismatch" / "target missing" error), the Runner re-perceives the
 page, re-finds the element by the descriptor recorded at decision time,
-records a ``heal`` event in the trail, and retries the action exactly
-once at the new number. The healed element has the same descriptor, so
-the classification that was approved is the classification that runs.
+records a ``heal`` event in the trail, and retries the action at the new
+number. The healed element has the same descriptor, so the classification
+that was approved is the classification that runs. v1.10: the retry is a
+chain — up to ``heal_attempts`` re-find + retry rounds per step (default
+2; 1 is the v0.2 behavior, 0 disables healing) — because a page that
+moves once can move again before the retry lands.
+
+Error recovery (v1.10): when a step still fails after its heal chain
+(driver raised, target genuinely gone), the run no longer has to die on
+the spot. With ``error_recovery_attempts`` chances for the whole run
+(default 1, 0 disables), the Runner records an ``error_recovery`` event
+with the error text, tells the decider what failed in its own history,
+drops any queued batch actions, resets the stuck/heal counters, and
+continues — the decider picks a different approach on a fresh perception.
+Governance denials, approval refusals, and budget stops never recover:
+they are decisions and limits, not accidents.
 
 Honest stop reasons: done / budget / denied / stuck / error. Stuck means
 the same (action, target) three times, or an unchanged element map for
@@ -72,6 +85,11 @@ class RunReport:
     # v1.8: transient-failure retries the decider spent (see
     # deciders._post_json); part of the run's true cost story.
     llm_retries: int = 0
+    # v1.10: self-heals spent (one per recorded heal event) and
+    # error-to-loop recoveries spent, counted off the trail at stop
+    # time — the same numbers report.summarize() shows.
+    heals: int = 0
+    error_recoveries: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -88,6 +106,8 @@ class RunReport:
             "llm_completion_tokens": self.llm_completion_tokens,
             "llm_calls": self.llm_calls,
             "llm_retries": self.llm_retries,
+            "heals": self.heals,
+            "error_recoveries": self.error_recoveries,
         }
 
 
@@ -110,6 +130,8 @@ class Runner:
         max_llm_tokens: Optional[int] = None,
         initial_history: Optional[list[dict]] = None,
         parent_trail_hash: Optional[str] = None,
+        heal_attempts: int = 2,
+        error_recovery_attempts: int = 1,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -140,6 +162,12 @@ class Runner:
         # recorded on the first perceive event so the two trails
         # chain together (see ghost_hands.resume.load_resume_context).
         self.parent_trail_hash = parent_trail_hash
+        # v1.10: heal chains (retries per step; 1 = the v0.2 single
+        # retry, 0 = healing off) and error-to-loop recovery (chances
+        # per run; 0 = a terminal step failure stops the run, as
+        # before). Negative values clamp to 0 rather than surprising.
+        self.heal_attempts = max(0, heal_attempts)
+        self.error_recovery_attempts = max(0, error_recovery_attempts)
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -185,6 +213,7 @@ class Runner:
         verified_ok = False  # a verify action has passed in this run
         done_rejections = 0  # require_verify gate: dones sent back
         recovery_left = self.recovery_attempts
+        error_recovery_left = self.error_recovery_attempts
 
         def try_recover(step_no: int, reason: str) -> bool:
             """v1.3: spend a recovery chance on a stuck run. Resets the
@@ -206,6 +235,41 @@ class Runner:
                     f"({reason}). The page has been re-perceived; "
                     "choose a different approach and do not repeat the "
                     "action that stalled.",
+                }
+            )
+            unchanged = 0
+            last_signature = None
+            seen_actions.clear()
+            self._batch_queue = []
+            return True
+
+        def try_error_recover(step_no: int, error_text: str) -> bool:
+            """v1.10: spend an error-recovery chance on a step that
+            failed terminally (heal chain exhausted, driver raised).
+            Mirrors the stuck recovery's shape — the failure is on the
+            trail, the decider is told what broke in its own history,
+            stale batch actions are dropped, and the stuck counters
+            reset — but the trigger is an execution error, not a stall.
+            False when no chances remain for this run. Governance
+            denials and budget stops never reach here."""
+            nonlocal error_recovery_left, unchanged, last_signature
+            if error_recovery_left <= 0:
+                return False
+            error_recovery_left -= 1
+            attempt = self.error_recovery_attempts - error_recovery_left
+            self.trail.record(
+                "error_recovery",
+                step_no,
+                error=error_text[:500],
+                attempt=attempt,
+            )
+            history.append(
+                {
+                    "kind": "system",
+                    "note": f"Error recovery {attempt}: the last action "
+                    f"failed with this error: {error_text}. The page "
+                    "has been re-perceived; choose a different approach "
+                    "and do not repeat the action that failed.",
                 }
             )
             unchanged = 0
@@ -543,48 +607,74 @@ class Runner:
                         "result", step, ok=False, result=f"error: {message}"
                     )
                     return self._stop(report, step, "error", message)
-            try:
-                result = self.driver.act(exec_action, element)
-            except Exception as exc:
-                healed = self._attempt_heal(step, action, element, exc)
-                if healed is None:
-                    self.trail.record(
-                        "result", step, ok=False, result=f"error: {exc}"
-                    )
-                    return self._stop(
-                        report, step, "error", f"action failed: {exc}"
-                    )
-                action, element = healed
-                # The retried action is recorded before it runs, too.
-                self.trail.record(
-                    "execute",
-                    step,
-                    action=action.to_dict(),
-                    classification=decision.classification,
-                    element=element.descriptor() if element is not None else None,
-                    healed=True,
-                    **raw_flag,
-                )
+            # v1.10 heal chain: act, and on a target failure re-perceive
+            # + retry at the fresh number, up to heal_attempts rounds
+            # for this step. The healed action is the same action
+            # re-pointed — same descriptor, same class — so the
+            # governance decision recorded above carries; approvals
+            # are never re-asked. Every retry is recorded before it
+            # runs and re-resolves secret placeholders at the same
+            # execution boundary as the first attempt.
+            result = ""
+            failure: Optional[Exception] = None
+            heals_this_step = 0
+            current_exec = exec_action
+            while True:
                 try:
-                    heal_exec = action
+                    result = self.driver.act(current_exec, element)
+                    failure = None
+                    break
+                except Exception as exc:
+                    failure = exc
+                    if heals_this_step >= self.heal_attempts:
+                        break
+                    healed = self._attempt_heal(
+                        step,
+                        action,
+                        element,
+                        exc,
+                        attempt=heals_this_step + 1,
+                    )
+                    if healed is None:
+                        break
+                    heals_this_step += 1
+                    action, element = healed
+                    # The retried action is recorded before it runs, too.
+                    self.trail.record(
+                        "execute",
+                        step,
+                        action=action.to_dict(),
+                        classification=decision.classification,
+                        element=element.descriptor()
+                        if element is not None
+                        else None,
+                        healed=True,
+                        **raw_flag,
+                    )
+                    current_exec = action
                     if action_secret_refs(action):
-                        heal_exec, more_values, _missing = resolve_action(
+                        current_exec, more_values, _missing = resolve_action(
                             action, self.secret_provider
                         )
                         for value in more_values:
                             if value not in secret_values:
                                 secret_values.append(value)
-                    result = self.driver.act(heal_exec, element)
-                except Exception as exc2:
-                    self.trail.record(
-                        "result", step, ok=False, result=f"error: {exc2}"
-                    )
-                    return self._stop(
-                        report,
-                        step,
-                        "error",
-                        f"action failed after heal: {exc2}",
-                    )
+            if failure is not None:
+                self.trail.record(
+                    "result", step, ok=False, result=f"error: {failure}"
+                )
+                failure_summary = (
+                    f"action failed after heal: {failure}"
+                    if heals_this_step
+                    else f"action failed: {failure}"
+                )
+                # v1.10: a terminal step failure can spend an
+                # error-recovery chance and hand the run back to the
+                # decider instead of stopping — the failure stays on
+                # the record either way.
+                if try_error_recover(step, str(failure)):
+                    continue
+                return self._stop(report, step, "error", failure_summary)
             if secret_values:
                 # A page that echoes a typed secret back must not
                 # smuggle it into the trail or the next prompt.
@@ -650,12 +740,14 @@ class Runner:
         action: Action,
         element,
         exc: Exception,
+        attempt: int = 1,
     ):
         """One self-healing retry: re-perceive, re-find the target by its
         recorded descriptor, and return (action, element) re-pointed at
         the new number — or None when healing does not apply or the
         element is genuinely gone. Always records a ``heal`` event when
-        it applies."""
+        it applies; ``attempt`` is the chain position (v1.10) and lands
+        on the event so a multi-heal step reads in order."""
         if action.target is None or element is None:
             return None
         message = str(exc)
@@ -677,6 +769,7 @@ class Runner:
             to_target=found.number if found is not None else None,
             found=found is not None,
             trigger=message[:200],
+            attempt=attempt,
         )
         if found is None:
             return None
@@ -718,6 +811,17 @@ class Runner:
         report.map_chars = acct["map_chars"]
         report.est_tokens = acct["est_tokens"]
         report.actions_by_class = acct["actions_by_class"]
+        # v1.10: heal + error-recovery totals, counted off the trail
+        # itself — the same source report.summarize() reads, so the
+        # RunReport and the HTML audit can never disagree.
+        report.heals = sum(
+            1 for ev in self.trail.events if ev.get("type") == "heal"
+        )
+        report.error_recoveries = sum(
+            1
+            for ev in self.trail.events
+            if ev.get("type") == "error_recovery"
+        )
         if report.steps == 0:
             report.steps = acct["steps"]
         return report

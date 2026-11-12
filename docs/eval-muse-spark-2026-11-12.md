@@ -40,3 +40,45 @@ Actual model usage (API-reported): 37,776 prompt + 50,506 completion tokens acro
 > Verdict: openai-compatible harness -> muse-spark-1.3 via Meta Model API (Responses) passed 3/4 graded tasks; failed: shifting-page-heal. Failures are measurements, not harness errors.
 
 Every run above executed under the same Governor, approval policy, and tamper-evident trail as production runs — the scorecard is a by-product of the audit tooling, not a separate benchmark rig.
+
+---
+
+# Appendix — Chromium-body tasks, same day, baseline code
+
+Provenance: a second run the same evening covered the four
+Chromium-body tasks (the header above says five; there are four —
+corrected here). Same model (Muse Spark 1.3), same harness, same
+list prices. This run used the code as of v1.9 (commit aae47807),
+before the v1.10 heal-chain and error-recovery wave. Total
+API-reported cost: about $0.30.
+
+Combined suite (both runs, 8 tasks): 5 of 8 passed. Totals:
+131 model calls, 79,874 prompt + 108,370 completion tokens,
+about $0.56 at list prices. Whole-suite perception output was
+3,216 characters of element maps across 49 steps; for scale,
+LangChain's published Playwright MCP comparison measured a
+median of about 17,000 characters of tool output for a single
+navigation. The fixture pages here are smaller than production
+sites, so treat that as a mechanism comparison (focused
+perception versus full page snapshots), not a benchmark score.
+
+# Ghost Hands — eval scorecard
+
+## openai-compatible harness -> muse-spark-1.3 via Meta Model API (Responses)
+
+**2/4 tasks succeeded** · 22 steps · 417.145s wall · ~366 perception tokens (chars/4 estimate) · 2 approvals · 0 heals
+Actual model usage (API-reported): 42,098 prompt + 57,864 completion tokens across 67 calls — the decider's own bill, not an estimate.
+
+| Task | Result | Steps | Detail |
+| --- | --- | --- | --- |
+| search-and-open-result | PASS | 6 | opened the Oakdale community archive article |
+| form-fill-and-submit | FAIL | 4 | typed values were [], expected ['2', 'Ada Lovelace', 'Ghost widget'] |
+| extract-table-cell | PASS | 11 | table extraction reported the Lantern row's wood: Birch |
+| login-trail-audit | FAIL | 1 | the username/password pair was never typed |
+
+> Verdict: openai-compatible harness -> muse-spark-1.3 via Meta Model API (Responses) passed 2/4 graded tasks; failed: form-fill-and-submit, login-trail-audit. Failures are measurements, not harness errors.
+
+Both failures stopped with reason "error" — the failure mode the
+v1.10 wave (heal chains, error-to-loop recovery) was built
+against. A re-run of the failed tasks on v1.10 code follows in a
+separate evidence file.

@@ -100,7 +100,11 @@ def test_error_stop_on_bad_target():
     pages = {"https://e.local/": "<button>Only</button>"}
     driver = FakeDriver(pages)
     steps = [{"kind": "click", "target": 99}, {"kind": "done", "summary": "x"}]
-    report = Runner(driver, ScriptedDecider(steps), trail=Trail()).run("err")
+    # Error recovery off: this test pins the terminal stop itself
+    # (v1.10 recovery from a failed step is covered separately).
+    report = Runner(
+        driver, ScriptedDecider(steps), trail=Trail(), error_recovery_attempts=0
+    ).run("err")
     # target 99 does not exist: FakeDriver gets element=None and raises
     assert report.stop_reason == "error"
 

@@ -40,7 +40,7 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > report and the MCP trail tool, the plan cache over MCP, and bench
 > proof cases for the v1.0 features — see the CHANGELOG.
 >
-> On GitHub `main`, the v1.2 through v1.9 waves are in
+> On GitHub `main`, the v1.2 through v1.10 waves are in
 > development: batched model calls with per-action governance,
 > real API-reported token accounting, the require-verify gate, a
 > fifth MCP tool (`hands_verify_trail`), governed recovery from
@@ -57,7 +57,10 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > retry with backoff for flaky model endpoints (retries counted
 > in the run's accounting), an opt-in JSON mode for stricter
 > model replies, an HTTP JSON API (`ghost-hands serve`), and a
-> completion webhook for finished runs. Their release is a
+> completion webhook for finished runs, heal chains that
+> follow an element that moves twice, and error-to-loop
+> recovery that feeds a failed action back to the model
+> instead of ending the run. Their release is a
 > separate gate.
 
 

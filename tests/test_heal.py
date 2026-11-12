@@ -85,8 +85,10 @@ def test_heal_click_after_mutation():
 
 def test_heal_retries_only_once():
     # Page keeps mutating: every snapshot swaps V1<->V2, so even the healed
-    # target is stale by the time it is acted on. The run must stop with an
-    # error after exactly one heal — never loop forever.
+    # target is stale by the time it is acted on. With heal_attempts=1 (the
+    # pre-v1.10 chain length) the run must stop with an error after exactly
+    # one heal — never loop forever. (The v1.10 default chain of 2 is
+    # covered in test_v110_features.py.)
     driver = FakeDriver({URL: V1}, start_url=URL)
 
     def flip(d):
@@ -94,13 +96,19 @@ def test_heal_retries_only_once():
         d.mutate_hook = flip
 
     driver.mutate_hook = flip
-    trail, report = _run(
+    trail = Trail()
+    report = Runner(
         driver,
-        [
-            {"kind": "type", "target": 1, "text": "x"},
-            {"kind": "done", "summary": "typed"},
-        ],
-    )
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "x"},
+                {"kind": "done", "summary": "typed"},
+            ]
+        ),
+        trail=trail,
+        heal_attempts=1,
+        error_recovery_attempts=0,
+    ).run("heal test")
     assert report.stop_reason == "error"
     assert "after heal" in report.summary
     heals = [e for e in trail.events if e["type"] == "heal"]
@@ -110,13 +118,21 @@ def test_heal_retries_only_once():
 def test_heal_gone_element_stops_with_error():
     driver = FakeDriver({URL: V1}, start_url=URL)
     driver.mutate_hook = lambda d: d.pages.__setitem__(URL, GONE)
-    trail, report = _run(
+    trail = Trail()
+    # Error recovery off: this test pins the terminal stop itself
+    # (recovery from exactly this failure is covered in
+    # test_v110_features.py).
+    report = Runner(
         driver,
-        [
-            {"kind": "type", "target": 1, "text": "x"},
-            {"kind": "done", "summary": "typed"},
-        ],
-    )
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "x"},
+                {"kind": "done", "summary": "typed"},
+            ]
+        ),
+        trail=trail,
+        error_recovery_attempts=0,
+    ).run("heal test")
     assert report.stop_reason == "error"
     heals = [e for e in trail.events if e["type"] == "heal"]
     assert len(heals) == 1 and heals[0]["found"] is False

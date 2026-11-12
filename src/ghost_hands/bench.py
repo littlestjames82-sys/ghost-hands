@@ -809,6 +809,15 @@ HEAL_V2 = f"""<!doctype html><html><head><title>Heal Todo</title></head>
 </body></html>"""
 HEAL_GONE = """<!doctype html><html><head><title>Heal Todo</title></head>
 <body><h1>Everything changed</h1><p>No form here anymore.</p></body></html>"""
+HEAL_V3 = f"""<!doctype html><html><head><title>Heal Todo</title></head>
+<body>
+<h1>Heal Todo</h1>
+<button>Dismiss banner</button>
+<button>Close notice</button>
+<input id="new-item" name="new-item" type="text" placeholder="New item">
+<button data-append-to="items" data-from-field="new-item">Add item</button>
+<ul id="items"><li>Existing item</li></ul>
+</body></html>"""
 
 
 def case_heal_descriptor_lookup():
@@ -879,11 +888,50 @@ def case_heal_gone_element():
             ]
         ),
         trail=trail,
+        # Pin the terminal stop: v1.10 error recovery would otherwise
+        # hand the run back to the decider (covered by its own case).
+        error_recovery_attempts=0,
     )
     report = runner.run("heal bench: gone")
     assert report.stop_reason == "error", report.summary
     heals = [e for e in trail.events if e["type"] == "heal"]
     assert len(heals) == 1 and heals[0]["found"] is False
+
+
+def case_v110_heal_chain():
+    # The element moves TWICE: [1] on the perceived page, [2] when the
+    # first heal looks, [3] when the retry lands. A single heal (the
+    # pre-v1.10 behavior) dies on the second move; the chain follows.
+    driver = FakeDriver({HEAL_URL: HEAL_V1}, start_url=HEAL_URL)
+
+    def second(d):
+        d.pages[HEAL_URL] = HEAL_V3
+
+    def first(d):
+        d.pages[HEAL_URL] = HEAL_V2
+        d.mutate_hook = second
+
+    driver.mutate_hook = first
+    trail = Trail()
+    runner = Runner(
+        driver,
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "twice moved"},
+                {"kind": "done", "summary": "typed"},
+            ]
+        ),
+        trail=trail,
+    )
+    report = runner.run("heal bench: chain")
+    assert report.stop_reason == "done", report.summary
+    assert driver.fields.get("new-item") == "twice moved", driver.fields
+    heals = [e for e in trail.events if e["type"] == "heal"]
+    assert len(heals) == 2, heals
+    assert [h["attempt"] for h in heals] == [1, 2]
+    assert heals[0]["to_target"] == 2 and heals[1]["to_target"] == 3
+    assert report.heals == 2
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -1642,7 +1690,10 @@ setTimeout(() => {
             {"kind": "wait", "text": "Ghost text that never comes", "seconds": 1},
             {"kind": "done", "summary": "unreached"},
         ]
-        runner = Runner(driver, ScriptedDecider(steps), trail=trail)
+        runner = Runner(
+            driver, ScriptedDecider(steps), trail=trail,
+            error_recovery_attempts=0,  # pin the terminal stop itself
+        )
         report = runner.run("wait bench")
         assert report.stop_reason == "error", report.summary
         failures = [e for e in trail.events if e["type"] == "result" and not e["ok"]]
@@ -3155,7 +3206,17 @@ def case_v16_batch_runbook():
 
 def case_v17_chain_linked_resume():
     steps = [{"kind": "click", "target": 999}]
-    _driver, trail, report = _run(DEMO_PAGES, steps, goal="book the thing")
+    # Error recovery off for the parent: this case needs a run that
+    # DIES mid-task (v1.10 recovery would hand it back to the decider,
+    # whose exhausted script would then claim done).
+    trail = Trail()
+    runner = Runner(
+        FakeDriver(DEMO_PAGES),
+        ScriptedDecider(steps),
+        trail=trail,
+        error_recovery_attempts=0,
+    )
+    report = runner.run("book the thing")
     assert report.stop_reason != "done"
     from .resume import load_resume_context
 
@@ -3405,6 +3466,7 @@ CASES = [
     ("v17 doctor: the deciders row names what's configured", case_v17_doctor_deciders),
     ("v18 retry: a flaky endpoint's 500s are survived and counted", case_v18_retry_survives_flaky_endpoint),
     ("v19 http api: health, a governed run, and a verified chain over the wire", case_v19_http_api),
+    ("v1.10 heal chain: an element that moves twice is followed to its third position", case_v110_heal_chain),
 ]
 
 

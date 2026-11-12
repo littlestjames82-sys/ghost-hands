@@ -222,6 +222,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
     approvals_denied = 0
     channels: set[str] = set()
     heals = downloads = dialogs = net_events = 0
+    error_recoveries = 0
     stop_reason = ""
     stop_summary = ""
     llm_usage: dict[str, int] = {}
@@ -251,6 +252,8 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
                     approvals_denied += 1
         elif kind == "heal":
             heals += 1
+        elif kind == "error_recovery":
+            error_recoveries += 1
         elif kind == "download":
             downloads += 1
         elif kind == "dialog":
@@ -293,6 +296,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         "approvals_denied": approvals_denied,
         "approval_channels": sorted(channels),
         "heals": heals,
+        "error_recoveries": error_recoveries,
         "downloads": downloads,
         "dialogs": dialogs,
         "net_events": net_events,
