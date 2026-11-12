@@ -6,7 +6,21 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.8 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.9 in development (on GitHub main; release is Ryan's gate)
+
+The integration-surface release (v1.9 wave):
+
+- **`ghost-hands serve`.** A stdlib-only HTTP JSON API: `GET
+  /health`, `POST /run` (scripted steps under the same Governor;
+  asks denied unless the server is started with `--approve-all`),
+  and `POST /verify-trail`. Optional bearer auth via
+  `GHOST_HANDS_SERVE_TOKEN`. Runs are serialized; the response
+  carries the report plus the trail summary with its chain
+  verdict.
+- **Completion webhook.** When `GHOST_HANDS_WEBHOOK_URL` is set,
+  finished runs (CLI `run`, `batch` roll-up, HTTP `/run`) POST
+  their report JSON to it. A webhook failure is noted, never
+  fatal — the trail remains the record.
 
 The survive-the-network release (v1.8 wave):
 

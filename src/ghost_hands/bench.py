@@ -3237,6 +3237,40 @@ def case_v18_retry_survives_flaky_endpoint():
         os.environ.pop("GHOST_HANDS_RETRY_BACKOFF", None)
 
 
+def case_v19_http_api():
+    import urllib.request as _u
+
+    from .server import make_server
+
+    srv = make_server(host="127.0.0.1", port=0)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        with _u.urlopen(base + "/health", timeout=10) as resp:
+            health = json.loads(resp.read())
+        assert health["ok"] is True
+        payload = {
+            "goal": "search it",
+            "steps": [
+                {"kind": "type", "target": 1, "text": "ghost"},
+                {"kind": "click", "target": 2},
+                {"kind": "done", "summary": "via http"},
+            ],
+        }
+        req = _u.Request(
+            base + "/run",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with _u.urlopen(req, timeout=15) as resp:
+            out = json.loads(resp.read())
+        assert out["report"]["stop_reason"] == "done", out
+        assert out["trail_summary"]["chain"]["ok"] is True
+    finally:
+        srv.shutdown()
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -3370,6 +3404,7 @@ CASES = [
     ("v17 resume chain: the child trail records its parent's last hash", case_v17_chain_linked_resume),
     ("v17 doctor: the deciders row names what's configured", case_v17_doctor_deciders),
     ("v18 retry: a flaky endpoint's 500s are survived and counted", case_v18_retry_survives_flaky_endpoint),
+    ("v19 http api: health, a governed run, and a verified chain over the wire", case_v19_http_api),
 ]
 
 

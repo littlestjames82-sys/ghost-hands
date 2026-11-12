@@ -188,7 +188,23 @@ def cmd_run(args) -> int:
     finally:
         driver.close()
     _print_report(report, trail)
+    _notify_webhook({"source": "cli-run", "report": report.to_dict()})
     return 0 if report.stop_reason == "done" else 1
+
+
+def _notify_webhook(payload: dict) -> None:
+    """v1.9: fire the completion webhook when configured; a failed
+    notification is printed, never fatal (see webhook.py)."""
+    import os as _os
+
+    if not (_os.environ.get("GHOST_HANDS_WEBHOOK_URL") or ""):
+        return
+    from .webhook import post_webhook
+
+    if post_webhook(payload):
+        print("webhook: report posted")
+    else:
+        print("webhook: post failed (run result unaffected)")
 
 
 def cmd_export(args) -> int:
@@ -313,7 +329,20 @@ def cmd_batch(args) -> int:
         f"{total_tokens:,} LLM tokens across {total_calls} model calls "
         "(scripted runs report 0 — they make none)"
     )
+    _notify_webhook({"source": "cli-batch", "results": results})
     return 0 if done == len(results) else 1
+
+
+def cmd_serve(args) -> int:
+    from .server import serve
+
+    serve(
+        host=args.host,
+        port=args.port,
+        driver_kind=args.driver,
+        approve_all=bool(args.approve_all),
+    )
+    return 0
 
 
 def cmd_check(args) -> int:
@@ -763,6 +792,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="per-script cap on API-reported LLM tokens (v1.8)",
     )
 
+    p_serve = sub.add_parser(
+        "serve",
+        help="serve the HTTP JSON API (v1.9): GET /health, POST /run, "
+        "POST /verify-trail; bearer token via GHOST_HANDS_SERVE_TOKEN",
+    )
+    p_serve.add_argument("--host", default="127.0.0.1")
+    p_serve.add_argument("--port", type=int, default=8765)
+    p_serve.add_argument("--driver", choices=("fake", "chromium"), default="fake")
+    p_serve.add_argument(
+        "--approve-all",
+        action="store_true",
+        help="approve every 'ask' verdict for HTTP runs (callers "
+        "cannot answer prompts; without this, asks are denied)",
+    )
+
     p_check = sub.add_parser(
         "check",
         help="preflight a run script against the Governor (v1.5): "
@@ -1067,6 +1111,7 @@ def main(argv=None) -> int:
         "run": cmd_run,
         "check": cmd_check,
         "batch": cmd_batch,
+        "serve": cmd_serve,
         "export": cmd_export,
         "verify-trail": cmd_verify_trail,
         "costs": cmd_costs,
