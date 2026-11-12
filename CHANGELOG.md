@@ -6,7 +6,7 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.1 in development (on GitHub main; release is Ryan's gate)
+## [1.1.0] — 2026-11-11
 
 - **Focused perception.** New `ElementMap.render_focused(goal)`:
   when a page's map exceeds the char budget, elements are scored by

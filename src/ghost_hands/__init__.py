@@ -81,7 +81,18 @@ page before a run may claim success), and the governed plan cache
 (a run that ends ``done`` stores its proven steps; the next run with
 the same goal replays them through the full Governor with no decider
 calls, falling back to the live decider if the page changed).
+
+v1.1 adds focused perception (``ElementMap.render_focused`` — when a
+page's map exceeds the render budget, elements are scored against
+the goal and the relevant ones are kept, under their original
+numbers; the OpenAI-compatible decider perceives through it), trail
+integrity surfaced everywhere (the HTML report header and the MCP
+``hands_trail`` tool both carry the hash-chain verdict), the plan
+cache over MCP (``hands_run`` honors ``GHOST_HANDS_CACHE``), and
+bench proof cases for the v1.0 features.
 """
+
+__version__ = "1.1.0"
 
 from .actions import Action
 from .android_driver import AndroidDriver
@@ -104,8 +115,6 @@ from .secrets import SecretProvider
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail, verify_trail
 from .verify import evaluate_verify
-
-__version__ = "1.0.0"
 
 __all__ = [
     "Action",
