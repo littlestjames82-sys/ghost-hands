@@ -6,7 +6,25 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 + v1.3 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 + v1.3 + v1.4 in development (on GitHub main; release is Ryan's gate)
+
+The orientation-and-resilience release (v1.4 wave):
+
+- **Page-change notes.** Between steps the Runner diffs the fresh
+  element map against the previous one (navigation, elements
+  appeared/gone by identity) and tells the decider what changed,
+  in its history — orientation from the delta instead of
+  re-deriving it from the full map every step.
+- **Fallback decider.** `FallbackDecider(primary, fallback)`
+  answers with the second decider when the primary raises (endpoint
+  down, unparseable reply), counts failovers, and reports combined
+  token usage so accounting and the budget cap stay true. Over MCP,
+  `GHOST_HANDS_FALLBACK_BASE_URL` (plus optional key/model vars)
+  wires a fallback endpoint into goal-driven `hands_run`.
+- **`ghost-hands costs`.** Aggregates the API-reported token spend
+  recorded in trail stop events across any number of trail files —
+  per-run rows plus totals. Runs whose decider reported no usage
+  are counted as unreported, never estimated into the totals.
 
 The finish-the-job release (v1.3 wave):
 

@@ -28,7 +28,12 @@ from pathlib import Path
 
 from . import actions as A
 from .actions import Action
-from .deciders import OpenAICompatibleDecider, RuleDecider, ScriptedDecider
+from .deciders import (
+    FallbackDecider,
+    OpenAICompatibleDecider,
+    RuleDecider,
+    ScriptedDecider,
+)
 from .drivers import (
     CDPMessageBuffer,
     ChromiumDriver,
@@ -2868,6 +2873,105 @@ def case_v13_scorecard_render():
     assert "form-fill-and-submit" in card
 
 
+def case_v14_change_note_reaches_decider():
+    class Recording:
+        def __init__(self, steps):
+            self.inner = ScriptedDecider(steps)
+            self.histories = []
+
+        def decide(self, goal, element_map, history):
+            self.histories.append([dict(h) for h in history])
+            return self.inner.decide(goal, element_map, history)
+
+    steps = [
+        {"kind": "type", "target": 1, "text": "ghost"},
+        {"kind": "click", "target": 2},
+        {"kind": "done", "summary": "searched"},
+    ]
+    decider = Recording(steps)
+    report = Runner(FakeDriver(DEMO_PAGES), decider, trail=Trail()).run(
+        "search the demo web"
+    )
+    assert report.stop_reason == "done", report.summary
+    notes = [
+        h.get("note", "")
+        for hist in decider.histories
+        for h in hist
+        if h.get("kind") == "system"
+    ]
+    assert any(n.startswith("Page change: navigated to") for n in notes), notes
+
+
+def case_v14_fallback_decider_failover():
+    # Two stub servers need separate handler subclasses: the shared
+    # handler keeps its queue on the class, so one _start_stub call
+    # would overwrite the other's script.
+    class PrimaryHandler(_StubLLMHandler):
+        queue = ["this is not json"]
+        seen = []
+
+    class FallbackHandler(_StubLLMHandler):
+        queue = [{"kind": "done", "summary": "fallback finished"}]
+        seen = []
+
+    def start(handler):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        return server, f"http://127.0.0.1:{server.server_address[1]}"
+
+    primary, pbase = start(PrimaryHandler)
+    fallback, fbase = start(FallbackHandler)
+    try:
+        decider = FallbackDecider(
+            OpenAICompatibleDecider(base_url=pbase, api_key="stub", model="stub-1"),
+            OpenAICompatibleDecider(base_url=fbase, api_key="stub", model="stub-1"),
+        )
+        report = Runner(FakeDriver(DEMO_PAGES), decider, trail=Trail()).run(
+            "survive the outage"
+        )
+        assert report.stop_reason == "done", report.summary
+        assert report.summary == "fallback finished"
+        assert decider.failovers == 1
+        assert report.llm_calls >= 1  # fallback usage is on the report
+    finally:
+        primary.shutdown()
+        fallback.shutdown()
+
+
+def case_v14_costs_aggregation(tmp_root=None):
+    import tempfile
+
+    from .cli import main as cli_main
+
+    try:
+        root = tempfile.mkdtemp(prefix="gh-costs-")
+    except OSError as exc:
+        return (SKIP, f"tempdir unavailable: {exc}")
+    import io
+    from contextlib import redirect_stdout
+
+    paths = []
+    for name, usage in (
+        ("a", {"llm_prompt_tokens": 100, "llm_completion_tokens": 20, "llm_calls": 2}),
+        ("b", {}),
+    ):
+        trail = Trail()
+        trail.record("perceive", 0, goal=f"goal {name}", url="https://x.local/")
+        trail.record("stop", 1, reason="done", summary="ok", **usage)
+        path = os.path.join(root, f"{name}.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for ev in trail.events:
+                fh.write(json.dumps(ev) + "\n")
+        paths.append(path)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli_main(["costs", *paths])
+    out = buf.getvalue()
+    assert rc == 0, out
+    assert "TOTAL: 120 tokens (100 prompt + 20 completion)" in out, out
+    assert "1 run(s) reported no usage" in out, out
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -2990,6 +3094,9 @@ CASES = [
     ("v13 recovery: a stuck run gets one governed second chance", case_v13_recovery_second_chance),
     ("v13 budget: the LLM token cap stops the run between steps", case_v13_token_budget_cap),
     ("v13 scorecard: eval renders an honest markdown scorecard", case_v13_scorecard_render),
+    ("v14 change notes: the decider is told what changed on the page", case_v14_change_note_reaches_decider),
+    ("v14 fallback: a dead primary endpoint fails over mid-run", case_v14_fallback_decider_failover),
+    ("v14 costs: token spend aggregates across trail files", case_v14_costs_aggregation),
 ]
 
 

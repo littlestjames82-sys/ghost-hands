@@ -99,7 +99,12 @@ from .android_driver import AndroidDriver
 from .busagent import BusAgent
 from .busclient import BusClient, BusError
 from .cache import PlanCache, plan_key
-from .deciders import OpenAICompatibleDecider, RuleDecider, ScriptedDecider
+from .deciders import (
+    FallbackDecider,
+    OpenAICompatibleDecider,
+    RuleDecider,
+    ScriptedDecider,
+)
 from .doctor import Check, run_doctor
 from .drivers import ChromiumDriver, FakeDriver
 from .errors import HandsError
@@ -132,6 +137,7 @@ __all__ = [
     "Governor",
     "HandsError",
     "ObservingDecider",
+    "FallbackDecider",
     "OpenAICompatibleDecider",
     "PhoneApprover",
     "PlanCache",

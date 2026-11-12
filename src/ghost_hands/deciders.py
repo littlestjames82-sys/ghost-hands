@@ -342,3 +342,52 @@ class OpenAICompatibleDecider:
             return [Action.from_dict(parsed)]
         except (ValueError, TypeError) as exc:
             raise HandsError(f"decider returned an invalid action: {exc}") from exc
+
+
+class FallbackDecider:
+    """v1.4: two deciders, one job. The primary answers; when it
+    raises HandsError (endpoint down, bad reply, rate limit), the
+    fallback answers instead and the failover is counted on
+    ``failovers``. Token usage is the sum of both, so the Runner's
+    accounting and budget cap see the run's true cost. Batch mode
+    is on when either side supports it; a side without
+    ``decide_batch`` contributes single actions."""
+
+    def __init__(self, primary, fallback) -> None:
+        self.primary = primary
+        self.fallback = fallback
+        self.failovers = 0
+        self.batch = bool(
+            getattr(primary, "batch", False)
+            or getattr(fallback, "batch", False)
+        )
+
+    @property
+    def usage(self) -> dict:
+        total = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        for side in (self.primary, self.fallback):
+            side_usage = getattr(side, "usage", None)
+            if isinstance(side_usage, dict):
+                for key in total:
+                    total[key] += int(side_usage.get(key) or 0)
+        return total
+
+    def decide(self, goal, element_map, history) -> Action:
+        try:
+            return self.primary.decide(goal, element_map, history)
+        except HandsError:
+            self.failovers += 1
+            return self.fallback.decide(goal, element_map, history)
+
+    def decide_batch(self, goal, element_map, history) -> list[Action]:
+        def ask(side) -> list[Action]:
+            batch_fn = getattr(side, "decide_batch", None)
+            if batch_fn is not None and getattr(side, "batch", True):
+                return batch_fn(goal, element_map, history)
+            return [side.decide(goal, element_map, history)]
+
+        try:
+            return ask(self.primary)
+        except HandsError:
+            self.failovers += 1
+            return ask(self.fallback)

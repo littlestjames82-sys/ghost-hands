@@ -204,6 +204,62 @@ def cmd_verify_trail(args) -> int:
     return 2 if verdict["hashed"] == 0 else 1
 
 
+def cmd_costs(args) -> int:
+    """v1.4: aggregate real LLM token spend across trail files.
+
+    Reads each trail's stop event (via report.summarize) and totals
+    the API-reported usage recorded since v1.2. Trails from runs
+    whose decider reported no usage are counted as unreported —
+    never estimated into the totals."""
+    from .report import summarize
+    from .trail import read_trail
+
+    rows: list[dict] = []
+    totals = {"runs": 0, "calls": 0, "prompt": 0, "completion": 0, "unreported": 0}
+    for path in args.trail_files:
+        try:
+            events = read_trail(path)
+        except (OSError, ValueError) as exc:
+            print(f"error: cannot read trail {path}: {exc}", file=sys.stderr)
+            return 2
+        info = summarize(events)
+        usage = info.get("llm_usage") or {}
+        row = {
+            "file": str(path),
+            "goal": info.get("goal", ""),
+            "stop_reason": info.get("stop_reason", ""),
+            "calls": int(usage.get("llm_calls") or 0),
+            "prompt": int(usage.get("llm_prompt_tokens") or 0),
+            "completion": int(usage.get("llm_completion_tokens") or 0),
+        }
+        row["total"] = row["prompt"] + row["completion"]
+        rows.append(row)
+        totals["runs"] += 1
+        if row["calls"]:
+            totals["calls"] += row["calls"]
+            totals["prompt"] += row["prompt"]
+            totals["completion"] += row["completion"]
+        else:
+            totals["unreported"] += 1
+    if getattr(args, "json", False):
+        print(json.dumps({"runs": rows, "totals": totals}, indent=2))
+        return 0
+    for row in rows:
+        spend = (
+            f"{row['total']:,} tok / {row['calls']} calls"
+            if row["calls"]
+            else "usage not reported"
+        )
+        print(f"{row['file']}: {row['goal'][:48]} [{row['stop_reason']}] {spend}")
+    print(
+        f"TOTAL: {totals['prompt'] + totals['completion']:,} tokens "
+        f"({totals['prompt']:,} prompt + {totals['completion']:,} completion) "
+        f"across {totals['calls']} model calls in {totals['runs']} run(s); "
+        f"{totals['unreported']} run(s) reported no usage"
+    )
+    return 0
+
+
 def cmd_mcp(args) -> int:
     from .mcp_server import main as mcp_main
 
@@ -546,6 +602,17 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_verify.add_argument("trail_file", help="the trail JSONL to verify")
 
+    p_costs = sub.add_parser(
+        "costs",
+        help="aggregate real LLM token spend across trail files "
+        "(v1.4): API-reported usage only, unreported runs counted "
+        "as unreported, never estimated",
+    )
+    p_costs.add_argument("trail_files", nargs="+", help="trail JSONL files")
+    p_costs.add_argument(
+        "--json", action="store_true", help="emit the rows and totals as JSON"
+    )
+
     p_export = sub.add_parser("export", help="graduate a trail into a Ghost Hands script")
     p_export.add_argument("trail_file")
     p_export.add_argument("-o", "--output", help="output .py path (default: stdout)")
@@ -748,6 +815,7 @@ def main(argv=None) -> int:
         "run": cmd_run,
         "export": cmd_export,
         "verify-trail": cmd_verify_trail,
+        "costs": cmd_costs,
         "mcp": cmd_mcp,
         "report": cmd_report,
         "bus-agent": cmd_bus_agent,

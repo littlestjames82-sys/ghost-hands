@@ -166,6 +166,7 @@ class Runner:
         history: list[dict] = []
         seen_actions: dict[tuple, int] = {}
         last_signature: Optional[str] = None
+        prev_map = None  # v1.4: last step's map, for change notes
         unchanged = 0
         verified_ok = False  # a verify action has passed in this run
         done_rejections = 0  # require_verify gate: dones sent back
@@ -328,6 +329,16 @@ class Runner:
                     )
                     if not plan_queue:
                         plan_completed = True
+            if action is None and not self._batch_queue:
+                # v1.4: tell the decider what changed since the last
+                # step (navigation, elements appeared/gone) so it can
+                # orient on the delta instead of re-deriving it.
+                note = element_map.diff_note(prev_map)
+                if note:
+                    history.append(
+                        {"kind": "system", "note": f"Page change: {note}"}
+                    )
+            prev_map = element_map
             if action is None and not self._batch_queue and self.max_llm_tokens:
                 # v1.3 token budget: checked between steps (never
                 # mid-action), only when the decider reports usage.

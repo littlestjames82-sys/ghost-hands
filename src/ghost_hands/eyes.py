@@ -313,6 +313,42 @@ class ElementMap:
         source_hash = hashlib.sha256(repr(items).encode()).hexdigest()[:16]
         return cls(elements=els, url=url, budget=budget, source_hash=source_hash)
 
+    def diff_note(self, previous: Optional["ElementMap"]) -> Optional[str]:
+        """v1.4: a one-line summary of what changed since the previous
+        map — navigation, elements appeared/gone (by identity key) —
+        or None when nothing meaningful changed. The Runner hands
+        this to the decider so it can orient on the delta instead of
+        re-deriving it from the full map every step."""
+        if previous is None:
+            return None
+        parts: list[str] = []
+        if self.url != previous.url:
+            parts.append(f"navigated to {self.url or '(same page)'}")
+        from collections import Counter
+
+        def label(key: tuple) -> str:
+            tag, role, name = key
+            shown = name or tag
+            return f"{shown} ({role or tag})" if name else shown
+
+        old_counts = Counter(el.key() for el in previous.elements)
+        new_counts = Counter(el.key() for el in self.elements)
+        appeared = [
+            label(k) for k in (new_counts - old_counts).elements()
+        ]
+        gone = [label(k) for k in (old_counts - new_counts).elements()]
+        if appeared:
+            shown = ", ".join(appeared[:5])
+            extra = f" (+{len(appeared) - 5} more)" if len(appeared) > 5 else ""
+            parts.append(f"appeared: {shown}{extra}")
+        if gone:
+            shown = ", ".join(gone[:5])
+            extra = f" (+{len(gone) - 5} more)" if len(gone) > 5 else ""
+            parts.append(f"gone: {shown}{extra}")
+        if not parts:
+            return None
+        return "; ".join(parts)
+
     def get(self, number: Optional[int]) -> Optional[Element]:
         if number is None:
             return None

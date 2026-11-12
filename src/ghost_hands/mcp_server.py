@@ -39,6 +39,9 @@ switching bodies or approvers means starting a new server process:
   ``goal`` with no ``steps`` — the server's own OpenAI-compatible
   decider (configured by ``GHOST_HANDS_BASE_URL`` / ``GHOST_HANDS_MODEL``
   / ``GHOST_HANDS_API_KEY``) drives the run under the same Governor.
+  ``GHOST_HANDS_FALLBACK_BASE_URL`` (v1.4, with optional
+  ``GHOST_HANDS_FALLBACK_API_KEY`` / ``GHOST_HANDS_FALLBACK_MODEL``)
+  adds a second endpoint that answers when the primary fails.
 - ``GHOST_HANDS_APPROVER`` (phone, v0.8): route "ask" verdicts through
   ``PhoneApprover`` — Ryan's phone decides via the MrGhosty bridge.
   Unset (the default): asks are denied with an explanation.
@@ -518,10 +521,28 @@ def _run(session: HandsSession, args: dict) -> dict:
     trail = Trail()
     approver = None
     if llm_mode:
-        from .deciders import OpenAICompatibleDecider
+        from .deciders import FallbackDecider, OpenAICompatibleDecider
 
         try:
             decider = OpenAICompatibleDecider()
+            fallback_url = (
+                os.environ.get("GHOST_HANDS_FALLBACK_BASE_URL") or ""
+            ).strip()
+            if fallback_url:
+                # v1.4: a second endpoint answers when the primary
+                # fails; the run's token accounting covers both.
+                decider = FallbackDecider(
+                    decider,
+                    OpenAICompatibleDecider(
+                        base_url=fallback_url,
+                        api_key=os.environ.get(
+                            "GHOST_HANDS_FALLBACK_API_KEY"
+                        )
+                        or None,
+                        model=os.environ.get("GHOST_HANDS_FALLBACK_MODEL")
+                        or None,
+                    ),
+                )
         except HandsError as exc:
             return _text(f"ERROR: {exc}", is_error=True)
     else:
