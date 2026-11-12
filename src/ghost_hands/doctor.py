@@ -129,6 +129,53 @@ def _check_chromium() -> Check:
     return Check("chromium", PASS, f"{path} — {version}" if version else path)
 
 
+def _check_deciders(env: dict) -> Check:
+    """v1.7: which LLM deciders are configured, from env presence
+    only (values never shown). OpenAI-compatible needs a key and a
+    base URL (or the OpenRouter key); Anthropic needs its key; a
+    fallback endpoint and batch mode are noted as extras."""
+    configured = []
+    if (env.get("GHOST_HANDS_API_KEY") or "").strip() and (
+        env.get("GHOST_HANDS_BASE_URL") or ""
+    ).strip():
+        configured.append("openai-compatible")
+    elif (env.get("OPENROUTER_API_KEY") or "").strip():
+        configured.append("openai-compatible (OpenRouter)")
+    if (
+        env.get("GHOST_HANDS_ANTHROPIC_API_KEY") or ""
+    ).strip() or (env.get("ANTHROPIC_API_KEY") or "").strip():
+        configured.append("anthropic")
+    extras = []
+    if (env.get("GHOST_HANDS_FALLBACK_BASE_URL") or "").strip():
+        extras.append("fallback endpoint set")
+    if (env.get("GHOST_HANDS_BATCH") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        extras.append("batch mode on")
+    mcp_kind = (env.get("GHOST_HANDS_DECIDER") or "").strip().lower()
+    if mcp_kind:
+        extras.append(f"MCP goal-driven decider: {mcp_kind}")
+    if configured:
+        detail = "configured: " + ", ".join(configured)
+        if extras:
+            detail += "; " + "; ".join(extras)
+        return Check("deciders", PASS, detail)
+    detail = "no LLM decider fully configured"
+    if extras:
+        detail += " (" + "; ".join(extras) + ")"
+    return Check(
+        "deciders",
+        WARN,
+        detail,
+        "set GHOST_HANDS_BASE_URL + GHOST_HANDS_API_KEY, or "
+        "GHOST_HANDS_ANTHROPIC_API_KEY / ANTHROPIC_API_KEY, to enable "
+        "live model runs.",
+    )
+
+
 def _check_packs() -> Check:
     broken = []
     for name in PACKS_CHECKED:
@@ -500,6 +547,7 @@ def run_doctor(
         _check_chromium(),
         _check_packs(),
         _check_model(env),
+        _check_deciders(env),
         _check_bus(bus_url, env, timeout),
         _check_bridge(bridge_url, bridge_token, env, timeout),
         _check_adb(which),

@@ -310,6 +310,7 @@ def test_doctor_json_schema_and_summary(bridge):
         "chromium",
         "policy packs",
         "model env",
+        "deciders",
         "ghostbus",
         "phone bridge",
         "adb",

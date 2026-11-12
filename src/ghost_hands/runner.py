@@ -105,6 +105,7 @@ class Runner:
         recovery_attempts: int = 1,
         max_llm_tokens: Optional[int] = None,
         initial_history: Optional[list[dict]] = None,
+        parent_trail_hash: Optional[str] = None,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -131,6 +132,10 @@ class Runner:
         self.max_llm_tokens = max_llm_tokens
         # v1.5: seed history for a resumed run (see ghost_hands.resume).
         self.initial_history = initial_history
+        # v1.7: the parent trail's last hash for a resumed run —
+        # recorded on the first perceive event so the two trails
+        # chain together (see ghost_hands.resume.load_resume_context).
+        self.parent_trail_hash = parent_trail_hash
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -249,6 +254,11 @@ class Runner:
                 map_chars=len(rendered),
                 signature=element_map.signature(),
                 **({"goal": goal} if step == 1 and goal else {}),
+                **(
+                    {"parent_hash": self.parent_trail_hash}
+                    if step == 1 and self.parent_trail_hash
+                    else {}
+                ),
             )
 
             # stuck: map unchanged across consecutive steps

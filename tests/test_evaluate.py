@@ -184,6 +184,9 @@ def test_suite_totals_and_json_shape():
         "est_tokens": 200,
         "approvals_requested": 2,
         "heals": 0,
+        "llm_prompt_tokens": 0,
+        "llm_completion_tokens": 0,
+        "llm_calls": 0,
     }
     payload = suite_json(scores, "stub", [STUB_LABEL])
     assert payload["decider"] == "stub"

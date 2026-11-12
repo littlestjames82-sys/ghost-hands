@@ -238,6 +238,11 @@ class TaskScore:
     actions_by_class: dict
     approvals_requested: int
     heals: int
+    # v1.7: real API-reported usage for this task's run (0 when the
+    # decider reports none — stub/rules runs make no billed calls).
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_calls: int = 0
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -256,6 +261,9 @@ class TaskScore:
             "actions_by_class": self.actions_by_class,
             "approvals_requested": self.approvals_requested,
             "heals": self.heals,
+            "llm_prompt_tokens": self.llm_prompt_tokens,
+            "llm_completion_tokens": self.llm_completion_tokens,
+            "llm_calls": self.llm_calls,
             "extra": self.extra,
         }
 
@@ -969,6 +977,9 @@ def _score_task(
         actions_by_class=report.actions_by_class,
         approvals_requested=asks,
         heals=heals,
+        llm_prompt_tokens=report.llm_prompt_tokens,
+        llm_completion_tokens=report.llm_completion_tokens,
+        llm_calls=report.llm_calls,
         extra=extra,
     )
 
@@ -1059,6 +1070,9 @@ def suite_totals(scores: list[TaskScore]) -> dict:
         "est_tokens": sum(s.est_tokens for s in scores),
         "approvals_requested": sum(s.approvals_requested for s in scores),
         "heals": sum(s.heals for s in scores),
+        "llm_prompt_tokens": sum(s.llm_prompt_tokens for s in scores),
+        "llm_completion_tokens": sum(s.llm_completion_tokens for s in scores),
+        "llm_calls": sum(s.llm_calls for s in scores),
     }
 
 
@@ -1165,6 +1179,14 @@ def render_scorecard(payloads: list[dict]) -> str:
             f"{totals.get('approvals_requested', 0)} approvals · "
             f"{totals.get('heals', 0)} heals"
         )
+        if totals.get("llm_calls"):
+            lines.append(
+                f"Actual model usage (API-reported): "
+                f"{totals.get('llm_prompt_tokens', 0):,} prompt + "
+                f"{totals.get('llm_completion_tokens', 0):,} completion "
+                f"tokens across {totals['llm_calls']} calls — the "
+                "decider's own bill, not an estimate."
+            )
         lines.append("")
         lines.append("| Task | Result | Steps | Detail |")
         lines.append("| --- | --- | --- | --- |")

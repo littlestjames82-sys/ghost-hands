@@ -3153,6 +3153,51 @@ def case_v16_batch_runbook():
     assert "BATCH: 1/2 done" in out, out
 
 
+def case_v17_chain_linked_resume():
+    steps = [{"kind": "click", "target": 999}]
+    _driver, trail, report = _run(DEMO_PAGES, steps, goal="book the thing")
+    assert report.stop_reason != "done"
+    from .resume import load_resume_context
+
+    parent_last = [e for e in trail.events if e.get("hash")][-1]["hash"]
+    import tempfile
+
+    try:
+        root = tempfile.mkdtemp(prefix="gh-resume-")
+        path = os.path.join(root, "parent.jsonl")
+        with open(path, "w", encoding="utf-8") as fh:
+            for e in trail.events:
+                fh.write(json.dumps(e) + "\n")
+    except OSError as exc:
+        return (SKIP, f"tempfile unavailable: {exc}")
+    ctx = load_resume_context(path)
+    assert ctx["parent_hash"] == parent_last
+    child = Trail()
+    runner = Runner(
+        FakeDriver(DEMO_PAGES),
+        ScriptedDecider([{"kind": "done", "summary": "continued"}]),
+        trail=child,
+        parent_trail_hash=ctx["parent_hash"],
+    )
+    rep2 = runner.run("continue the booking")
+    assert rep2.stop_reason == "done"
+    assert child.events[0].get("parent_hash") == parent_last
+    assert verify_trail(child.events)["ok"] is True
+
+
+def case_v17_doctor_deciders():
+    from .doctor import PASS, run_doctor
+
+    checks = run_doctor(
+        env={"GHOST_HANDS_ANTHROPIC_API_KEY": "sk-bench"}, timeout=0.2
+    )
+    row = [c for c in checks if c.name == "deciders"][0]
+    assert row.status == PASS and "anthropic" in row.detail
+    checks2 = run_doctor(env={}, timeout=0.2)
+    row2 = [c for c in checks2 if c.name == "deciders"][0]
+    assert row2.status != PASS
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -3283,6 +3328,8 @@ CASES = [
     ("v15 resume: a dead run's trail seeds its continuation", case_v15_resume_from_trail),
     ("v16 anthropic: the native Claude decider drives a run, usage mapped", case_v16_anthropic_decider_wire),
     ("v16 batch: a runbook of scripts with an honest roll-up", case_v16_batch_runbook),
+    ("v17 resume chain: the child trail records its parent's last hash", case_v17_chain_linked_resume),
+    ("v17 doctor: the deciders row names what's configured", case_v17_doctor_deciders),
 ]
 
 

@@ -6,7 +6,24 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.6 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.7 in development (on GitHub main; release is Ryan's gate)
+
+The proof-connected release (v1.7 wave):
+
+- **Chain-linked resume.** A resumed run's first trail event now
+  records the parent trail's last hash (`parent_hash`), so a run
+  and its continuation form one verifiable chain instead of two
+  unrelated files. `load_resume_context` surfaces the hash; the
+  CLI wires it automatically under `run --resume`.
+- **Real usage in the eval scorecard.** Task scores carry the
+  run's API-reported LLM tokens and call count; suite totals sum
+  them, and the scorecard prints an "Actual model usage" line
+  whenever a usage-reporting decider ran. Estimates stay labeled
+  estimates; the model's own bill is now on the card.
+- **Doctor knows the deciders.** A new `deciders` check reports
+  which LLM deciders are configured (OpenAI-compatible, Anthropic,
+  fallback endpoint, batch mode, MCP selection) from env presence
+  only — names, never values.
 
 The more-models, more-runs release (v1.6 wave):
 

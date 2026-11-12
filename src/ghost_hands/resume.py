@@ -7,7 +7,9 @@ of starting over: the goal, the last page the run perceived, how
 many actions it executed, and how it stopped. The CLI's
 ``run --resume <trail>`` seeds the new run with that page and a
 history note telling the decider what already happened; the old
-trail stays untouched as the record of the first attempt.
+trail stays untouched as the record of the first attempt. Since
+v1.7 the new run's first trail event also records the parent
+trail's last hash, so the pair forms one verifiable chain.
 """
 
 from __future__ import annotations
@@ -44,6 +46,11 @@ def load_resume_context(path: str | Path) -> dict[str, Any]:
             # behind the final action.
             if ev.get("url"):
                 last_url = str(ev["url"])
+    parent_hash = ""
+    for ev in reversed(events):
+        if ev.get("hash"):
+            parent_hash = str(ev["hash"])
+            break
     return {
         "goal": goal,
         "start_url": last_url,
@@ -51,6 +58,10 @@ def load_resume_context(path: str | Path) -> dict[str, Any]:
         "stop_reason": stop_reason,
         "stop_summary": stop_summary,
         "events": len(events),
+        # v1.7: the parent trail's last hash. The resumed run
+        # records it in its own first event, chaining the two
+        # trails together so the continuation is provable.
+        "parent_hash": parent_hash,
     }
 
 

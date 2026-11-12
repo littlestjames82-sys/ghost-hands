@@ -82,6 +82,7 @@ def cmd_run(args) -> int:
     # start where it stopped (unless the script names its own start)
     # and tell the decider what already happened.
     initial_history = None
+    resume_ctx = None
     if getattr(args, "resume", None):
         from .resume import load_resume_context, resume_note
 
@@ -178,6 +179,9 @@ def cmd_run(args) -> int:
         max_llm_tokens=getattr(args, "max_llm_tokens", None),
         recovery_attempts=int(getattr(args, "recovery_attempts", 1)),
         initial_history=initial_history,
+        parent_trail_hash=(
+            resume_ctx.get("parent_hash") or None if resume_ctx else None
+        ),
     )
     try:
         report = runner.run(args.goal or "")
