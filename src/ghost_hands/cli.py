@@ -143,6 +143,11 @@ def cmd_run(args) -> int:
         from .phone_approver import ObservingDecider
 
         decider = ObservingDecider(decider, phone_approver)
+    plan_cache = None
+    if getattr(args, "cache", None):
+        from .cache import PlanCache
+
+        plan_cache = PlanCache(args.cache)
     runner = Runner(
         driver,
         decider,
@@ -150,6 +155,7 @@ def cmd_run(args) -> int:
         approver=approver,
         trail=trail,
         start_url=start if args.driver in ("chromium", "android", "simphone") else None,
+        plan_cache=plan_cache,
     )
     try:
         report = runner.run(args.goal or "")
@@ -175,6 +181,24 @@ def cmd_export(args) -> int:
     else:
         print(script)
     return 0
+
+
+def cmd_verify_trail(args) -> int:
+    """Verify a trail's v1.0 hash chain: intact, tampered, or legacy."""
+    from .trail import read_trail, verify_trail
+
+    try:
+        events = read_trail(args.trail_file)
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read trail: {exc}", file=sys.stderr)
+        return 2
+    verdict = verify_trail(events)
+    print(f"events: {verdict['checked']} ({verdict['hashed']} hashed, "
+          f"{verdict['legacy']} legacy)")
+    print(f"verdict: {verdict['reason']}")
+    if verdict["ok"]:
+        return 0
+    return 2 if verdict["hashed"] == 0 else 1
 
 
 def cmd_mcp(args) -> int:
@@ -478,6 +502,20 @@ def build_parser() -> argparse.ArgumentParser:
     p_run.add_argument("--trail", default="ghost_hands_trail.jsonl",
                        help="trail output path (default: ghost_hands_trail.jsonl)")
     p_run.add_argument("--goal", default="", help="goal text recorded in the report")
+    p_run.add_argument(
+        "--cache",
+        help="governed plan cache file (v1.0): a run that ends 'done' "
+        "stores its proven steps here; a later run with the same --goal "
+        "and start page replays them governed, with no model/script "
+        "decisions for cached steps, falling back if the page changed",
+    )
+
+    p_verify = sub.add_parser(
+        "verify-trail",
+        help="verify a trail's hash chain (v1.0): exit 0 intact, "
+        "1 tampered/gapped, 2 legacy or unreadable",
+    )
+    p_verify.add_argument("trail_file", help="the trail JSONL to verify")
 
     p_export = sub.add_parser("export", help="graduate a trail into a Ghost Hands script")
     p_export.add_argument("trail_file")
@@ -674,6 +712,7 @@ def main(argv=None) -> int:
         "bench": cmd_bench,
         "run": cmd_run,
         "export": cmd_export,
+        "verify-trail": cmd_verify_trail,
         "mcp": cmd_mcp,
         "report": cmd_report,
         "bus-agent": cmd_bus_agent,

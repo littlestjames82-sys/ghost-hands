@@ -198,7 +198,14 @@ _SYSTEM_PROMPT = (
     '{"kind":"screenshot"}, {"kind":"pdf","path":"page.pdf"}, '
     '{"kind":"set_viewport","value":"mobile"}, '
     '{"kind":"wait","seconds":1}, {"kind":"wait","text":"Loaded","seconds":10}, '
-    '{"kind":"done","summary":"…"}. Targets are element numbers from the map.'
+    '{"kind":"verify","text":"Order confirmed"}, '
+    '{"kind":"verify","target":3}, {"kind":"verify","url":"/done"}, '
+    '{"kind":"done","summary":"…"}. Targets are element numbers from the map. '
+    "Before done, verify the result when you can: a verify action asserts "
+    "text, an element, or the URL, and a failed verify stops the run honestly. "
+    "For a credential, never invent or repeat its value: type the placeholder "
+    '"{{secret:NAME}}" (e.g. {{secret:PASSWORD}}) and Ghost Hands substitutes '
+    "the real value from the environment at execution time, outside the trail."
 )
 
 

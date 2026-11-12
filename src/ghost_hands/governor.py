@@ -92,6 +92,8 @@ def classify(
         "hover",
         "pdf",
         "set_viewport",
+        # v1.0: an assertion changes nothing by definition.
+        "verify",
     ):
         return READONLY
 

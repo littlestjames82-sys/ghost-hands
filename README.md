@@ -30,11 +30,64 @@ MIT licensed.
 
 MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 
-> Status: v0.9.3 — live on PyPI and GitHub:
+> Status: v0.9.4 — live on PyPI and GitHub:
 > [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
 > (`pip install ghost-hands`) ·
 > [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
 > [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
+>
+> **v1.0.0 is built and verified locally** (full pytest suite + 95/95
+> bench on the v1.0 tree) and is awaiting its release gate — the
+> published package is still the version above until that ships.
+
+
+## What's new in 1.0.0 — the trust-and-cost release
+
+Four capabilities no other browser agent in the comparison below
+ships together — each one aimed at a documented competitor gap:
+
+- **Tamper-evident trail.** Every trail event now carries a SHA-256
+  hash chained to the previous event (`prev` / `hash` in
+  `trail.py`). Edit, delete, or reorder any event and every later
+  hash breaks. `ghost-hands verify-trail trail.jsonl` (or
+  `verify_trail()` in Python) proves a record is exactly what was
+  written; a pre-1.0 trail is reported as legacy, never silently
+  passed. Playwright's trace viewer, Stagehand's session logs, and
+  Browser Use's run history are all editable text — this is an audit
+  record, not a log file.
+- **Secret placeholders — the model never sees a credential.**
+  A decider, script, or cached plan types `{{secret:PASSWORD}}`
+  instead of a value. The placeholder is all the decider, the
+  Governor, the approver, and the trail ever see; the Runner
+  substitutes the real value from `GHOST_HANDS_SECRET_PASSWORD`
+  (or a host-supplied in-memory mapping) at the execution boundary
+  only, and scrubs the value out of any result a page echoes back.
+  A missing secret is an honest error, never a literal typing of
+  the placeholder. This is the credential isolation Skyvern sells
+  as a hosted vault and Browser Use exposes to the agent's context —
+  here it is local, free, and proven by the trail. (`secrets.py`)
+- **The `verify` action — prove it, don't claim it.** A readonly
+  assertion (`verify` in `actions.py`, evaluated by the Runner in
+  `verify.py`) checks text on the page, an element's presence,
+  and/or the current URL, in any combination; every condition set
+  must hold. Put one before `done` and a run can no longer report
+  success for a state that never happened — the honest-stop answer
+  to the hallucinated-completion failure mode. A failed verify is
+  an `error` stop naming the failed condition.
+- **The governed plan cache — learn once, replay for free.**
+  With a cache (`Runner(plan_cache=PlanCache(path))`, or
+  `ghost-hands run --cache plans.json`), a run that ends `done`
+  stores its proven steps, keyed by goal + start URL, in an
+  owner-only local file. The next identical run replays each step
+  through the *same* loop — re-perceived, re-found by descriptor,
+  re-classified, re-approved when the policy says ask, re-recorded
+  in the new run's hash-chained trail — with **zero decider calls**
+  for cached steps. If a cached target is gone, the trail records
+  a `cache fallback` and the live decider takes over; runs that end
+  any way other than `done` store nothing. Stagehand caches actions
+  too — but ungoverned, and its cache is not an audit record.
+  Secrets stay placeholders in the cache, so a cached login plan
+  contains no credential. (`cache.py`)
 
 ## What's new in 0.9.0
 
@@ -514,7 +567,10 @@ GHOST_HANDS_POLICY = "standard"
 | **Eyes** (`eyes.py`) | Numbered **ElementMap** — `[3] <button> "Sign in"` — compact text with a character budget. No screenshots, no vision model. Two sources: an HTML snapshot parse (offline body), or the live browser — a composed-tree DOM walk (shadow roots + iframes) or the CDP Accessibility tree. |
 | **Hands** (`actions.py`) | Typed, JSON-serializable actions: navigate, click, type, press (with key chords), select, scroll, hover, double/right click, drag, click_at (raw coordinates), fill_form, set_file, download, extract (text/list/table/network), screenshot (to a real PNG file), pdf, set_viewport, wait / wait_for, tabs, session save/load, done. Targets are element numbers, never raw selectors. |
 | **Governor** (`governor.py`) | Classifies every action *before* execution and applies a policy: allow / ask / deny per class, a domain allowlist, blocked domains. Form submits and anything smelling like pay / send / delete / publish / transfer is **consequential**. |
-| **Trail** (`trail.py`) | JSONL provenance: perceive → decide → govern → execute → result → stop (plus `heal`, `dialog`, `net`, and `download` events), with per-run accounting (steps, perception chars, ~tokens at chars/4, actions by class). Govern + execute are recorded **before** the action runs. |
+| **Trail** (`trail.py`) | JSONL provenance: perceive → decide → govern → execute → result → stop (plus `heal`, `dialog`, `net`, `download`, and v1.0 `cache` events), with per-run accounting (steps, perception chars, ~tokens at chars/4, actions by class). Govern + execute are recorded **before** the action runs. **v1.0: every event is hash-chained (SHA-256) — the record is tamper-evident and verifiable with `verify-trail`.** |
+| **Secrets** (`secrets.py`) | v1.0 credential isolation: `{{secret:NAME}}` placeholders in type/select/fill_form values resolve from `GHOST_HANDS_SECRET_<NAME>` only at the execution boundary; results are scrubbed of resolved values. The decider, approver, trail, and plan cache only ever hold the placeholder. |
+| **Verify** (`verify.py`) | v1.0 readonly assertions (text / element / URL) evaluated by the Runner against the live perception — a run proves its outcome before it may claim `done`. |
+| **Plan cache** (`cache.py`) | v1.0 governed plan cache: `done` runs store their proven steps (owner-only file); identical goals replay them through the full Governor with zero decider calls, descriptor re-finding, and an on-trail fallback to the live decider when the page has changed. |
 | **Bodies** (`drivers.py`, `simphone.py`, `android_driver.py`) | `FakeDriver` (in-memory mini-web for tests/demos), `ChromiumDriver` (real Chromium via our own CDP client: auto-wait, tabs, session save/load, screenshots to disk, downloads/uploads, network capture, dialog policy, viewport emulation, PDF, env-proxy support with a credential-injecting local relay, stale-target detection), `SimPhoneDriver` (simulated Android-style phone: apps, notes, toggles, Back/Home, rendered PNG screenshots), and `AndroidDriver` (a real phone via the MrGhosty app's Ghost Hands bridge: loopback HTTP/JSON, pairing-token auth, accessibility-tree perception with `body_ref` targets, key-verified actions, real screenshots on API 30+, loopback-only by construction). The contract every body signs is [docs/BODY_PROTOCOL.md](docs/BODY_PROTOCOL.md). |
 | **Brains** (`deciders.py`) | `ScriptedDecider` (explicit steps), `RuleDecider` (deterministic offline rules — "go to…", "click…", "type… into…", "search for…"), `OpenAICompatibleDecider` (any OpenAI-compatible endpoint; key from env only, never stored; wire protocol proven against a local stub server). |
 | **Runner** (`runner.py`) | The loop, with a step budget, stuck detection (same action 3×, or an unchanged map for 3 steps), and self-healing: a target that moved mid-flight is re-found by descriptor and retried once, heal logged. Honest stop reasons: `done` / `budget` / `denied` / `stuck` / `error`. Silence is never consent: an "ask" with no approver is a denial. |
@@ -539,6 +595,9 @@ ghost-hands android-status                         # is MrGhosty's bridge answer
 ghost-hands run --script steps.json --driver android   # drive the real phone, governed
 ghost-hands run --script steps.json --policy policy.json --approve-all
 ghost-hands run --script steps.json --policy-pack strict   # or readonly
+| **Plan cache** (`cache.py`) | v1.0 governed plan cache: `done` runs store their proven steps (owner-only file); identical goals replay them through the full Governor with zero decider calls, descriptor re-finding, and an on-trail fallback to the live decider when the page has changed. |
+ghost-hands run --script steps.json --cache plans.json     # v1.0 governed plan cache
+ghost-hands verify-trail trail.jsonl                       # v1.0 prove a trail untampered
 ghost-hands export trail.jsonl -o replay.py        # graduate a trail into a script
 ghost-hands export trail.jsonl --driver fake --pages pages.json -o replay.py
 ghost-hands mcp                                    # MCP server on stdio
@@ -586,6 +645,10 @@ says which body each case ran on.
 | Wait for text/element/URL | Yes | Via act | Agent loop | **Yes — honest timeout on the record** |
 | **Every action classified + approval-gated** | **No** | **No** | **No** | **Yes — the whole point** |
 | **Run graduates into a replayable script** | Codegen (records new) | Action cache | No | **Yes — from the trail** |
+| **Tamper-evident audit trail** | No (editable trace) | No (session logs) | No (run history) | **Yes — SHA-256 hash chain, `verify-trail` (v1.0)** |
+| **Model never sees credentials** | No | No | Partial (`sensitive_data`) | **Yes — `{{secret:NAME}}` placeholders, env-only resolution (v1.0)** |
+| **Success assertions before `done`** | Test assertions only | No | No | **Yes — the `verify` action (v1.0)** |
+| **Automatic governed plan cache** | No | Action cache (ungoverned) | No | **Yes — proven plans replay governed, zero decider calls (v1.0)** |
 
 ## Honest status
 

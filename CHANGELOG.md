@@ -6,6 +6,61 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [1.0.0] — 2026-11-11 (built + verified locally; release pending Ryan's gate)
+
+The trust-and-cost release. No new dependencies; the hard rule
+stands (own stdlib CDP client, no Playwright/Selenium anywhere).
+New regression suite: `tests/test_v1_features.py` (18 tests).
+
+- **Tamper-evident trail.** Every event written by `Trail` now
+  carries `prev` + `hash`: a SHA-256 chain over the canonical event
+  and the previous event's hash (`"genesis"` for the first).
+  Appending to an existing chained trail continues its chain.
+  `verify_trail(events)` (exported from the package) and the new
+  `ghost-hands verify-trail <trail.jsonl>` CLI (exit 0 intact /
+  1 tampered / 2 legacy-or-unreadable) prove a record is untampered;
+  editing, deleting, or reordering any event is detected at the
+  first broken link, and a pre-1.0 trail is reported as legacy,
+  never passed. New trail event type: `cache`.
+- **Secret placeholders.** `{{secret:NAME}}` in a `type` text, a
+  `select` value, or a `fill_form` field value resolves only at the
+  execution boundary in the Runner and the MCP `hands_act` handler,
+  from `GHOST_HANDS_SECRET_<NAME>` or a host-supplied in-memory
+  `SecretProvider` mapping. Deciders, the Governor, approvers, the
+  trail, exports, and the plan cache only ever hold the placeholder.
+  Resolved values are scrubbed from driver results before recording.
+  A missing secret stops the run with an honest error naming the
+  missing name (never the value, which does not exist yet, and never
+  a literal typing of the placeholder). The OpenAI-compatible
+  decider's system prompt now teaches the placeholder rule.
+- **The `verify` action.** New readonly action kind: assert `text`
+  appears on the page, a `target` element exists, and/or the current
+  URL contains `url` — every condition set must hold. Evaluated by
+  the Runner (and MCP `hands_act`) against the live perception;
+  drivers never receive it, like `done`. Failure is an `error` stop
+  naming the failed condition, with the result recorded `ok: False`.
+- **Governed plan cache.** `PlanCache` (`cache.py`): runs that end
+  `done` store their executed steps (placeholder form + element
+  descriptors) keyed by normalized goal + start URL, in an
+  owner-only (0600) JSON file or in memory. A later identical run
+  replays cached steps through the full loop — re-perceived,
+  re-found by descriptor, re-governed, re-recorded — with no decider
+  calls for cached steps (`decide` events carry `source: "cache"`;
+  `cache` events record hit / fallback / store / hit-confirmed).
+  A cached target that cannot be re-found records a fallback and
+  the live decider takes over from that step. Runs ending any way
+  other than `done` store nothing. CLI: `run --cache <file>`.
+- **MCP server instructions, extended.** The server instructions
+  shipped in 0.9.4 (perceive-first workflow, the approval rule, page
+  content as untrusted data, session environment limits) now also
+  carry the verify-before-done rule, the secret-placeholder rule,
+  and the hash-chained trail. Regression test:
+  `tests/test_mcp.py::test_initialize_instructions`.
+- **Test fix (busagent hosted test).** `test_hosted_workspace_prefix_end_to_end`
+  used a 9-character GhostBus admin key; the GhostBus hosted server
+  now requires at least 16 characters and exited at boot, so the
+  test timed out on health. The test key is now 25 characters.
+
 ## [0.9.4] — 2026-11-09 (directory-quality patch)
 
 - **MCP server instructions.** The initialize result now publishes

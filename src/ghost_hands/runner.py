@@ -37,12 +37,15 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
 
 from .actions import Action
+from .cache import PlanCache
 from .drivers import Driver
 from .deciders import Decider
 from .errors import HandsError
 from .eyes import ElementMap
 from .governor import ASK, Decision, Governor, Policy
+from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
 from .trail import Trail
+from .verify import evaluate_verify
 
 Approver = Callable[[Action], bool]
 
@@ -87,6 +90,8 @@ class Runner:
         trail: Optional[Trail] = None,
         step_budget: int = 25,
         start_url: Optional[str] = None,
+        plan_cache: Optional[PlanCache] = None,
+        secrets: Optional[SecretProvider | dict] = None,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -96,6 +101,15 @@ class Runner:
         self.step_budget = step_budget
         self.start_url = start_url
         self._current_step = 0
+        # v1.0: the governed plan cache (learn once, replay governed
+        # and free) and secret placeholders (resolved only at the
+        # execution boundary; see secrets.py). With no mapping given,
+        # secrets resolve from the GHOST_HANDS_SECRET_* environment.
+        self.plan_cache = plan_cache
+        if isinstance(secrets, SecretProvider):
+            self.secret_provider = secrets
+        else:
+            self.secret_provider = SecretProvider(secrets)
 
     # -- driver integration --------------------------------------------------
     def _perceive_map(self) -> ElementMap:
@@ -134,6 +148,26 @@ class Runner:
         if self.start_url:
             self.driver.open(self.start_url)
 
+        # -- v1.0 plan cache: a proven plan for this goal + start URL
+        # replays through this same loop, governed step by step, with
+        # no decider calls. ``executed_plan`` collects this run's steps
+        # (placeholder form) for storage if the run ends ``done``.
+        cache_entry: Optional[dict] = None
+        cache_start = self.start_url or ""
+        plan_queue: list[dict] = []
+        cache_used = False
+        plan_completed = False
+        executed_plan: list[dict] = []
+        if self.plan_cache is not None:
+            if not cache_start:
+                try:
+                    cache_start = self.driver.current_url() or ""
+                except Exception:
+                    cache_start = ""
+            cache_entry = self.plan_cache.lookup(goal, cache_start)
+            if cache_entry is not None:
+                plan_queue = list(cache_entry.get("steps") or [])
+
         for step in range(1, self.step_budget + 1):
             self._current_step = step
             # -- perceive ---------------------------------------------------
@@ -165,15 +199,99 @@ class Runner:
                     report, step, "stuck", "element map unchanged for 3 consecutive steps"
                 )
 
-            # -- decide -------------------------------------------------------
-            try:
-                action = self.decider.decide(goal, element_map, history)
-            except Exception as exc:
-                return self._stop(report, step, "error", f"decider failed: {exc}")
-            self.trail.record("decide", step, action=action.to_dict())
+            # -- decide (or replay a cached step) ----------------------------
+            if plan_completed:
+                # A proven plan replayed in full: every step re-found
+                # its target, was re-governed, and any verify steps in
+                # the plan re-passed — that IS the proof, so the run
+                # ends with the proving run's summary and the decider
+                # is never consulted (a scripted decider would simply
+                # restart its script on the final page).
+                self.trail.record(
+                    "cache",
+                    step,
+                    phase="complete",
+                    key=cache_entry.get("key") if cache_entry else None,
+                )
+                summary = (
+                    (cache_entry or {}).get("summary")
+                    or "goal complete (governed plan cache replay)"
+                )
+                self._cache_finish(
+                    goal, cache_start, cache_entry, cache_used, executed_plan
+                )
+                return self._stop(report, step, "done", summary)
+            action: Optional[Action] = None
+            from_cache = False
+            if plan_queue:
+                planned = plan_queue[0]
+                try:
+                    candidate = Action.from_dict(planned.get("action") or {})
+                except (ValueError, TypeError):
+                    candidate = None  # type: ignore[assignment]
+                if candidate is not None and candidate.kind == "done":
+                    candidate = None  # a cached plan never claims done
+                if candidate is not None and candidate.target is not None:
+                    descriptor = planned.get("descriptor")
+                    found = (
+                        element_map.find_by_descriptor(descriptor)
+                        if descriptor
+                        else element_map.get(candidate.target)
+                    )
+                    if found is None:
+                        candidate = None  # type: ignore[assignment]
+                    else:
+                        candidate = Action.from_dict(
+                            {**candidate.to_dict(), "target": found.number}
+                        )
+                if candidate is None:
+                    self.trail.record(
+                        "cache",
+                        step,
+                        phase="fallback",
+                        key=cache_entry.get("key") if cache_entry else None,
+                        reason="cached step could not be re-found on the "
+                        "current page; the live decider takes over",
+                    )
+                    plan_queue = []
+                    cache_entry = None
+                    plan_completed = False
+                else:
+                    plan_queue.pop(0)
+                    action = candidate
+                    from_cache = True
+                    cache_used = True
+                    self.trail.record(
+                        "cache",
+                        step,
+                        phase="hit",
+                        key=cache_entry.get("key") if cache_entry else None,
+                        remaining=len(plan_queue),
+                    )
+                    if not plan_queue:
+                        plan_completed = True
+            if action is None:
+                try:
+                    action = self.decider.decide(goal, element_map, history)
+                except Exception as exc:
+                    return self._stop(report, step, "error", f"decider failed: {exc}")
+            self.trail.record(
+                "decide",
+                step,
+                action=action.to_dict(),
+                **({"source": "cache"} if from_cache else {}),
+            )
             history.append(action.to_dict())
 
             if action.kind == "done":
+                self._cache_finish(
+                    goal,
+                    cache_start,
+                    cache_entry,
+                    cache_used,
+                    executed_plan,
+                    summary=action.summary or "",
+                )
                 return self._stop(report, step, "done", action.summary or "goal complete")
 
             # stuck: same action at the same target, three times
@@ -217,8 +335,46 @@ class Runner:
                 element=element.descriptor() if element is not None else None,
                 **raw_flag,
             )
+            if action.kind == "verify":
+                # Evaluated here, against the live perception — the
+                # driver never sees a verify action (like ``done``).
+                ok, message = evaluate_verify(action, element_map, self.driver)
+                self.trail.record("result", step, ok=ok, result=message)
+                if not ok:
+                    return self._stop(report, step, "error", message)
+                report.results.append(message)
+                report.steps += 1
+                executed_plan.append(
+                    {
+                        "action": action.to_dict(),
+                        "descriptor": element.descriptor()
+                        if element is not None
+                        else None,
+                    }
+                )
+                continue
+            # Secret placeholders resolve here and only here: the
+            # recorded action above keeps the placeholder form, the
+            # approver saw the placeholder form, and the resolved
+            # action exists only as the driver's input.
+            exec_action = action
+            secret_values: list[str] = []
+            if action_secret_refs(action):
+                exec_action, secret_values, missing = resolve_action(
+                    action, self.secret_provider
+                )
+                if missing:
+                    message = (
+                        "secret(s) not available in the environment: "
+                        + ", ".join(missing)
+                        + " (set GHOST_HANDS_SECRET_<NAME>)"
+                    )
+                    self.trail.record(
+                        "result", step, ok=False, result=f"error: {message}"
+                    )
+                    return self._stop(report, step, "error", message)
             try:
-                result = self.driver.act(action, element)
+                result = self.driver.act(exec_action, element)
             except Exception as exc:
                 healed = self._attempt_heal(step, action, element, exc)
                 if healed is None:
@@ -240,7 +396,15 @@ class Runner:
                     **raw_flag,
                 )
                 try:
-                    result = self.driver.act(action, element)
+                    heal_exec = action
+                    if action_secret_refs(action):
+                        heal_exec, more_values, _missing = resolve_action(
+                            action, self.secret_provider
+                        )
+                        for value in more_values:
+                            if value not in secret_values:
+                                secret_values.append(value)
+                    result = self.driver.act(heal_exec, element)
                 except Exception as exc2:
                     self.trail.record(
                         "result", step, ok=False, result=f"error: {exc2}"
@@ -251,6 +415,10 @@ class Runner:
                         "error",
                         f"action failed after heal: {exc2}",
                     )
+            if secret_values:
+                # A page that echoes a typed secret back must not
+                # smuggle it into the trail or the next prompt.
+                result = scrub_text(result, secret_values)
             result_fields: dict[str, Any] = {}
             if action.kind == "extract":
                 # Structured extracts land in the record as parsed data,
@@ -265,8 +433,46 @@ class Runner:
             self.trail.record("result", step, ok=True, result=result, **result_fields)
             report.results.append(result)
             report.steps += 1
+            executed_plan.append(
+                {
+                    "action": action.to_dict(),
+                    "descriptor": element.descriptor()
+                    if element is not None
+                    else None,
+                }
+            )
 
         return self._stop(report, self.step_budget, "budget", "step budget exhausted")
+
+    def _cache_finish(
+        self,
+        goal: str,
+        cache_start: str,
+        cache_entry: Optional[dict],
+        cache_used: bool,
+        executed_plan: list[dict],
+        summary: str = "",
+    ) -> None:
+        """Settle the plan cache at a ``done`` stop: a replayed plan
+        earns a hit; a fresh successful run becomes the plan for its
+        goal. Runs that end any other way store nothing."""
+        if self.plan_cache is None:
+            return
+        if cache_used and cache_entry is not None:
+            self.plan_cache.note_hit(str(cache_entry.get("key")))
+            self.trail.record(
+                "cache",
+                self._current_step,
+                phase="hit-confirmed",
+                key=cache_entry.get("key"),
+            )
+        elif executed_plan:
+            key = self.plan_cache.store(
+                goal, cache_start, executed_plan, summary=summary
+            )
+            self.trail.record(
+                "cache", self._current_step, phase="store", key=key
+            )
 
     def _attempt_heal(
         self,

@@ -70,12 +70,24 @@ server instructions in the initialize result, and the four tool
 descriptions are fuller, written for directory tool-definition
 scoring. CI dependency bumps ride along. No tool, classification,
 or approval behaviour changes.
+
+v1.0 adds the trust-and-cost release: a tamper-evident trail (every
+event hash-chained; ``verify_trail`` / ``ghost-hands verify-trail``
+proves a record is untampered), secret placeholders (``{{secret:NAME}}``
+resolved from the environment only at the execution boundary — the
+model, the approver, and the trail never see a credential), the
+``verify`` action (a readonly assertion evaluated against the live
+page before a run may claim success), and the governed plan cache
+(a run that ends ``done`` stores its proven steps; the next run with
+the same goal replays them through the full Governor with no decider
+calls, falling back to the live decider if the page changed).
 """
 
 from .actions import Action
 from .android_driver import AndroidDriver
 from .busagent import BusAgent
 from .busclient import BusClient, BusError
+from .cache import PlanCache, plan_key
 from .deciders import OpenAICompatibleDecider, RuleDecider, ScriptedDecider
 from .doctor import Check, run_doctor
 from .drivers import ChromiumDriver, FakeDriver
@@ -88,10 +100,12 @@ from .phone_approver import ObservingDecider, PhoneApprover, build_summary
 from .phone_proof import run_phone_proof
 from .policies import PolicyPack, load_pack
 from .runner import RunReport, Runner
+from .secrets import SecretProvider
 from .simphone import SimPhoneDriver
-from .trail import Trail, read_trail
+from .trail import Trail, read_trail, verify_trail
+from .verify import evaluate_verify
 
-__version__ = "0.9.4"
+__version__ = "1.0.0"
 
 __all__ = [
     "Action",
@@ -111,21 +125,26 @@ __all__ = [
     "ObservingDecider",
     "OpenAICompatibleDecider",
     "PhoneApprover",
+    "PlanCache",
     "Policy",
     "PolicyPack",
     "RuleDecider",
     "RunReport",
     "Runner",
     "ScriptedDecider",
+    "SecretProvider",
     "SimPhoneDriver",
     "Trail",
     "build_summary",
     "classify",
+    "evaluate_verify",
     "export_ghost_hands_script",
     "governor_from_env",
     "load_pack",
+    "plan_key",
     "read_trail",
     "run_doctor",
     "run_phone_proof",
+    "verify_trail",
     "__version__",
 ]

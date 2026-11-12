@@ -71,7 +71,9 @@ the *core* set or fail honestly per action:
 - **Core (every body):** `navigate`, `click` (= tap on a phone),
   `type`, `press` (keys/chords; on a phone: `Back`, `Home`),
   `scroll`, `extract`, `screenshot`, `wait` / `wait_for`, `done`
-  (decider-side; never reaches `act`).
+  (decider-side; never reaches `act`), `verify` (v1.0: a readonly
+  assertion — text / element / URL — evaluated by the Runner against
+  the live perception; like `done`, it never reaches `act`).
 - **Web-shaped (bodies opt in):** `select`, `hover`, `double_click`,
   `right_click`, `drag`, `click_at`, `fill_form`, `set_file`,
   `download`, `pdf`, `set_viewport`.

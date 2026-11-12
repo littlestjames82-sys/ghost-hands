@@ -11,10 +11,20 @@ filename + byte size). v0.4 adds ``approval``: an approval requested or
 decided over an external channel (GhostBus in the bus agent). The govern and execute events are written *before*
 the action runs (record-before-execute), so even a crash leaves an honest
 account of what was about to happen.
+
+v1.0: the trail is **tamper-evident**. Every event carries ``prev`` (the
+previous event's hash, or ``"genesis"``) and ``hash`` (SHA-256 over the
+canonical event plus ``prev``) — a hash chain over the whole record.
+Editing, deleting, or reordering any event breaks every hash after it,
+and ``verify_trail`` / ``ghost-hands verify-trail`` proves a trail is
+exactly the record that was written. Trails written before v1.0 have
+no hashes; verification reports them as legacy rather than forging a
+verdict over a chain that was never there.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -37,7 +47,26 @@ EVENT_TYPES = (
     # (GhostBus, phone push). Fields: channel, phase ("request" |
     # "decision"), classification, run_id, approved (on decisions).
     "approval",
+    # v1.0: a governed plan-cache event. Fields: phase ("hit" |
+    # "fallback" | "store"), key, remaining (on hits).
+    "cache",
 )
+
+GENESIS = "genesis"
+
+
+def _event_hash(event: dict[str, Any], prev: str) -> str:
+    """SHA-256 over the canonical event (hash fields excluded) chained
+    to the previous event's hash."""
+    body = {k: v for k, v in event.items() if k not in ("hash", "prev")}
+    payload = json.dumps(
+        {"prev": prev, "event": body},
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class Trail:
@@ -47,6 +76,7 @@ class Trail:
     def __init__(self, path: Optional[str | Path] = None) -> None:
         self.path = Path(path) if path else None
         self.events: list[dict[str, Any]] = []
+        self._last_hash: str = GENESIS
         if self.path:
             self.path.parent.mkdir(parents=True, exist_ok=True)
             if self.path.exists():
@@ -58,6 +88,20 @@ class Trail:
                     os.chmod(self.path, 0o600)
                 except OSError:
                     pass
+                # Appending to an existing chained trail continues its
+                # chain from the last recorded hash.
+                try:
+                    lines = self.path.read_text(encoding="utf-8").splitlines()
+                    for line in reversed(lines):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        last = json.loads(line)
+                        if isinstance(last, dict) and last.get("hash"):
+                            self._last_hash = str(last["hash"])
+                        break
+                except (OSError, ValueError):
+                    pass
 
     def record(self, event_type: str, step: int, **fields: Any) -> dict[str, Any]:
         if event_type not in EVENT_TYPES:
@@ -68,6 +112,9 @@ class Trail:
             "ts": round(time.time(), 3),
         }
         event.update(fields)
+        event["prev"] = self._last_hash
+        event["hash"] = _event_hash(event, self._last_hash)
+        self._last_hash = event["hash"]
         self.events.append(event)
         if self.path:
             # Owner-only from creation (0o600): before v0.9.1 the
@@ -92,6 +139,81 @@ def read_trail(path: str | Path) -> list[dict[str, Any]]:
             if line:
                 events.append(json.loads(line))
     return events
+
+
+def verify_trail(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Verify a trail's v1.0 hash chain.
+
+    Returns a dict: ``ok`` (the chain is intact), ``checked`` (events
+    examined), ``hashed`` / ``legacy`` (events with / without a hash),
+    ``first_bad`` (index of the first event that fails, or None) and a
+    plain-language ``reason``. A trail with no hashed events at all is
+    legacy: ``ok`` is False and the reason says so — absence of a chain
+    is reported, never silently passed. Legacy events *before* the
+    first hashed event are tolerated (a v1.0 run appended to an old
+    file); a hashless event after the chain has started is a gap and
+    fails.
+    """
+    total_hashed = sum(1 for e in events if e.get("hash"))
+    hashed = 0
+    legacy = 0
+    expected_prev = GENESIS
+    chain_started = False
+    for index, event in enumerate(events):
+        digest = event.get("hash")
+        if not digest:
+            if chain_started:
+                return {
+                    "ok": False,
+                    "checked": len(events),
+                    "hashed": total_hashed,
+                    "legacy": legacy,
+                    "first_bad": index,
+                    "reason": f"event {index} has no hash but the chain "
+                    "had already started — the record has a gap",
+                }
+            legacy += 1
+            continue
+        chain_started = True
+        if event.get("prev") != expected_prev:
+            return {
+                "ok": False,
+                "checked": len(events),
+                "hashed": total_hashed,
+                "legacy": legacy,
+                "first_bad": index,
+                "reason": f"event {index} does not chain to the previous "
+                "event — an event was removed, reordered, or inserted",
+            }
+        if _event_hash(event, expected_prev) != digest:
+            return {
+                "ok": False,
+                "checked": len(events),
+                "hashed": total_hashed,
+                "legacy": legacy,
+                "first_bad": index,
+                "reason": f"event {index} hash mismatch — its contents "
+                "were changed after it was written",
+            }
+        hashed += 1
+        expected_prev = str(digest)
+    if hashed == 0:
+        return {
+            "ok": False,
+            "checked": len(events),
+            "hashed": 0,
+            "legacy": legacy,
+            "first_bad": None,
+            "reason": "legacy trail: no hash chain (written before v1.0)",
+        }
+    return {
+        "ok": True,
+        "checked": len(events),
+        "hashed": total_hashed,
+        "legacy": legacy,
+        "first_bad": None,
+        "reason": "hash chain intact",
+    }
 
 
 def accounting(events: list[dict[str, Any]]) -> dict[str, Any]:

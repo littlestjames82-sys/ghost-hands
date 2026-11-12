@@ -39,6 +39,9 @@ ACTION_KINDS = (
     "download",
     "pdf",
     "set_viewport",
+    # v1.0: a readonly assertion evaluated by the Runner against the
+    # live perception (see verify.py) — prove it, don't claim it.
+    "verify",
 )
 
 EXTRACT_MODES = ("text", "list", "table", "network")
@@ -194,6 +197,26 @@ def wait_for(
 
 def done(summary: str = "") -> Action:
     return Action(kind="done", summary=summary)
+
+
+def verify(
+    text: Optional[str] = None,
+    target: Optional[int] = None,
+    url_contains: Optional[str] = None,
+) -> Action:
+    """Assert the current state before claiming success (v1.0).
+
+    Every condition set must hold: ``text`` appears on the page,
+    ``target`` is an element number that exists, ``url_contains`` is a
+    substring of the current URL. Readonly; evaluated by the Runner
+    against the live perception, never sent to a driver. A failed
+    verification stops the run with an honest error."""
+    return Action(
+        kind="verify",
+        text=text,
+        target=int(target) if target is not None else None,
+        url=url_contains,
+    )
 
 
 # -- v0.3 constructors -------------------------------------------------------
