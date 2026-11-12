@@ -39,6 +39,11 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > v1.1.0 adds focused perception, trail-integrity surfacing in the
 > report and the MCP trail tool, the plan cache over MCP, and bench
 > proof cases for the v1.0 features — see the CHANGELOG.
+>
+> On GitHub `main`, the v1.2 wave is in development: batched model
+> calls with per-action governance, real API-reported token
+> accounting, the require-verify gate, and a fifth MCP tool
+> (`hands_verify_trail`). Its release is a separate gate.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release
@@ -446,8 +451,8 @@ driver.close()
 ## Use it in your MCP client
 
 The MCP server runs on stdio as `ghost-hands mcp`; install it first with
-`pip install ghost-hands`. It exposes four tools: `hands_perceive`,
-`hands_act`, `hands_run`, and `hands_trail`. The server reads its
+`pip install ghost-hands`. It exposes five tools: `hands_perceive`,
+`hands_act`, `hands_run`, `hands_trail`, and `hands_verify_trail`. The server reads its
 configuration from environment variables, once per process:
 `GHOST_HANDS_DRIVER` (`fake`, `chromium`, `simphone`, or `android`;
 default `fake`), `GHOST_HANDS_POLICY` (a policy pack name; default

@@ -6,6 +6,36 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [Unreleased] — v1.2 in development (on GitHub main; release is Ryan's gate)
+
+The measured-cost release: fewer model calls, real token numbers,
+and success that must be proven when the operator says so.
+
+- **Batched decisions, governed one by one.** An OpenAI-compatible
+  decider built with `batch=True` (or `GHOST_HANDS_BATCH=1`) may
+  return up to 5 actions from one model call via `decide_batch`.
+  The Runner executes them one at a time through the unchanged
+  loop — re-perceive, classify, approve, record, execute — so a
+  batch is a cost optimization, never a governance bypass. A queued
+  action whose target no longer resolves on the fresh page drops
+  the rest of the batch and the decider is asked for a single fresh
+  step. Batch-derived decisions are recorded with `source: "batch"`.
+- **Real token accounting.** When the model API returns a `usage`
+  object, the decider accumulates it and the Runner reports actual
+  `llm_prompt_tokens` / `llm_completion_tokens` / `llm_calls` on the
+  RunReport, in the trail's stop event, and as an "actual LLM
+  tokens" card in the HTML report — next to (never replacing) the
+  offline chars/4 estimate used when no usage is reported.
+- **The require-verify gate.** `Runner(require_verify=True)`, the
+  CLI's `--require-verify`, and `hands_run`'s `require_verify`
+  argument reject a `done` claim until a verify action has passed
+  in the same run; the rejection and its reason are recorded and
+  shown to the decider, and three unproven dones end the run as an
+  honest error.
+- **Fifth MCP tool: `hands_verify_trail`.** Verifies any trail's
+  hash chain (or the session's own) and returns the verdict —
+  integrity checking is now a first-class tool, not just a CLI.
+
 ## [1.1.0] — 2026-11-11
 
 - **Focused perception.** New `ElementMap.render_focused(goal)`:

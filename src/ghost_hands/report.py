@@ -224,6 +224,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
     heals = downloads = dialogs = net_events = 0
     stop_reason = ""
     stop_summary = ""
+    llm_usage: dict[str, int] = {}
     goal = ""
     first_url = ""
     timestamps = []
@@ -257,6 +258,14 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif kind == "stop":
             stop_reason = str(ev.get("reason") or "")
             stop_summary = str(ev.get("summary") or "")
+            for field_name in (
+                "llm_prompt_tokens",
+                "llm_completion_tokens",
+                "llm_calls",
+            ):
+                value = ev.get(field_name)
+                if isinstance(value, int) and value >= 0:
+                    llm_usage[field_name] = value
     duration = (max(timestamps) - min(timestamps)) if len(timestamps) >= 2 else 0.0
     body = "web (Chromium / fake web)"
     urls = [str(ev.get("url") or "") for ev in events if ev.get("type") == "perceive"]
@@ -288,6 +297,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         "net_events": net_events,
         "event_count": len(events),
         "chain": verify_trail(events),
+        "llm_usage": llm_usage,
     }
 
 
@@ -546,6 +556,17 @@ def render_report(events: list[dict[str, Any]], skipped: int = 0) -> str:
             "downloads / dialogs / net",
         ),
     ]
+    if info["llm_usage"]:
+        usage = info["llm_usage"]
+        total = usage.get("llm_prompt_tokens", 0) + usage.get(
+            "llm_completion_tokens", 0
+        )
+        cards.append(
+            (
+                f"{total:,} tok / {usage.get('llm_calls', 0)} calls",
+                "actual LLM tokens (API-reported)",
+            )
+        )
     out.append('<div class="cards">')
     for number, label in cards:
         out.append(

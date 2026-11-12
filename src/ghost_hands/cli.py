@@ -156,6 +156,7 @@ def cmd_run(args) -> int:
         trail=trail,
         start_url=start if args.driver in ("chromium", "android", "simphone") else None,
         plan_cache=plan_cache,
+        require_verify=bool(getattr(args, "require_verify", False)),
     )
     try:
         report = runner.run(args.goal or "")
@@ -508,6 +509,12 @@ def build_parser() -> argparse.ArgumentParser:
         "stores its proven steps here; a later run with the same --goal "
         "and start page replays them governed, with no model/script "
         "decisions for cached steps, falling back if the page changed",
+    )
+    p_run.add_argument(
+        "--require-verify",
+        action="store_true",
+        help="reject a script's 'done' until a verify step has passed "
+        "in the same run (v1.2): success must be proven, not claimed",
     )
 
     p_verify = sub.add_parser(

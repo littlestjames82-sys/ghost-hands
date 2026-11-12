@@ -63,6 +63,12 @@ class RunReport:
     actions_by_class: dict = field(default_factory=dict)
     trail_path: Optional[str] = None
     results: list[str] = field(default_factory=list)
+    # v1.2: real LLM usage when the decider reports it (the OpenAI-
+    # compatible decider accumulates the API's usage object); zeros
+    # mean "not reported", and est_tokens stays the offline estimate.
+    llm_prompt_tokens: int = 0
+    llm_completion_tokens: int = 0
+    llm_calls: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -75,6 +81,9 @@ class RunReport:
             "actions_by_class": self.actions_by_class,
             "trail_path": self.trail_path,
             "results": self.results,
+            "llm_prompt_tokens": self.llm_prompt_tokens,
+            "llm_completion_tokens": self.llm_completion_tokens,
+            "llm_calls": self.llm_calls,
         }
 
 
@@ -92,6 +101,7 @@ class Runner:
         start_url: Optional[str] = None,
         plan_cache: Optional[PlanCache] = None,
         secrets: Optional[SecretProvider | dict] = None,
+        require_verify: bool = False,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -106,6 +116,11 @@ class Runner:
         # execution boundary; see secrets.py). With no mapping given,
         # secrets resolve from the GHOST_HANDS_SECRET_* environment.
         self.plan_cache = plan_cache
+        # v1.2: when True, a `done` claim is rejected (and the decider
+        # told why) until some verify action has passed in this run.
+        self.require_verify = require_verify
+        # v1.2: queued remainder of a decider batch (see decide_batch).
+        self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
             self.secret_provider = secrets
         else:
@@ -143,6 +158,8 @@ class Runner:
         seen_actions: dict[tuple, int] = {}
         last_signature: Optional[str] = None
         unchanged = 0
+        verified_ok = False  # a verify action has passed in this run
+        done_rejections = 0  # require_verify gate: dones sent back
 
         self._wire_event_sink()
         if self.start_url:
@@ -200,7 +217,7 @@ class Runner:
                 )
 
             # -- decide (or replay a cached step) ----------------------------
-            if plan_completed:
+            if plan_completed and (verified_ok or not self.require_verify):
                 # A proven plan replayed in full: every step re-found
                 # its target, was re-governed, and any verify steps in
                 # the plan re-passed — that IS the proof, so the run
@@ -223,6 +240,7 @@ class Runner:
                 return self._stop(report, step, "done", summary)
             action: Optional[Action] = None
             from_cache = False
+            from_batch = False
             if plan_queue:
                 planned = plan_queue[0]
                 try:
@@ -270,9 +288,38 @@ class Runner:
                     )
                     if not plan_queue:
                         plan_completed = True
+            force_single = False
+            if action is None and self._batch_queue:
+                # v1.2 batch remainder: the page has been re-perceived
+                # since the batch was planned, so a queued target that
+                # no longer resolves drops the rest of the batch and
+                # the live decider takes over with a single fresh step
+                # — never act on a stale element number, and never
+                # re-ask for a batch in the same breath (the model's
+                # plan just diverged from the page).
+                queued = self._batch_queue[0]
+                if queued.target is None or element_map.get(queued.target) is not None:
+                    action = self._batch_queue.pop(0)
+                    from_batch = True
+                else:
+                    self._batch_queue = []
+                    force_single = True
             if action is None:
                 try:
-                    action = self.decider.decide(goal, element_map, history)
+                    batch_fn = getattr(self.decider, "decide_batch", None)
+                    if (
+                        batch_fn is not None
+                        and getattr(self.decider, "batch", False)
+                        and not force_single
+                    ):
+                        actions = batch_fn(goal, element_map, history)
+                        if not actions:
+                            raise HandsError("decider returned an empty batch")
+                        action = actions[0]
+                        self._batch_queue = list(actions[1:])
+                        from_batch = True
+                    else:
+                        action = self.decider.decide(goal, element_map, history)
                 except Exception as exc:
                     return self._stop(report, step, "error", f"decider failed: {exc}")
             self.trail.record(
@@ -280,9 +327,39 @@ class Runner:
                 step,
                 action=action.to_dict(),
                 **({"source": "cache"} if from_cache else {}),
+                **({"source": "batch"} if from_batch and not from_cache else {}),
             )
             history.append(action.to_dict())
 
+            if action.kind == "done" and self.require_verify and not verified_ok:
+                # v1.2 require-verify gate: success must be proven, not
+                # claimed. The done is recorded above; here it is sent
+                # back with the reason in the decider's own history.
+                done_rejections += 1
+                self.trail.record(
+                    "result",
+                    step,
+                    ok=False,
+                    result="done rejected: require_verify is on and no "
+                    "verify action has passed yet in this run",
+                )
+                if done_rejections >= 3:
+                    return self._stop(
+                        report,
+                        step,
+                        "error",
+                        "done claimed 3 times without a passing verify "
+                        "(require_verify is on)",
+                    )
+                history.append(
+                    {
+                        "kind": "system",
+                        "note": "done rejected: no verify action has "
+                        "passed yet. Run a verify action that proves the "
+                        "result (page text, element, or URL), then done.",
+                    }
+                )
+                continue
             if action.kind == "done":
                 self._cache_finish(
                     goal,
@@ -342,6 +419,7 @@ class Runner:
                 self.trail.record("result", step, ok=ok, result=message)
                 if not ok:
                     return self._stop(report, step, "error", message)
+                verified_ok = True
                 report.results.append(message)
                 report.steps += 1
                 executed_plan.append(
@@ -518,7 +596,21 @@ class Runner:
     def _stop(self, report: RunReport, step: int, reason: str, summary: str) -> RunReport:
         report.stop_reason = reason
         report.summary = summary
-        self.trail.record("stop", step, reason=reason, summary=summary)
+        # v1.2: real LLM usage, when the decider reports it, lands on
+        # the report and in the trail's stop event (so the HTML report
+        # can show actual tokens next to the offline estimate).
+        usage = getattr(self.decider, "usage", None)
+        usage_fields: dict[str, Any] = {}
+        if isinstance(usage, dict) and usage.get("calls"):
+            report.llm_prompt_tokens = int(usage.get("prompt_tokens") or 0)
+            report.llm_completion_tokens = int(usage.get("completion_tokens") or 0)
+            report.llm_calls = int(usage.get("calls") or 0)
+            usage_fields = {
+                "llm_prompt_tokens": report.llm_prompt_tokens,
+                "llm_completion_tokens": report.llm_completion_tokens,
+                "llm_calls": report.llm_calls,
+            }
+        self.trail.record("stop", step, reason=reason, summary=summary, **usage_fields)
         acct = self.trail.accounting()
         report.map_chars = acct["map_chars"]
         report.est_tokens = acct["est_tokens"]

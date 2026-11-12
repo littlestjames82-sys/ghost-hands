@@ -157,7 +157,8 @@ def test_chromium_session_smoke(monkeypatch):
         )
         names = [t["name"] for t in listing["result"]["tools"]]
         assert names == [
-            "hands_perceive", "hands_act", "hands_run", "hands_trail"]
+            "hands_perceive", "hands_act", "hands_run", "hands_trail",
+            "hands_verify_trail"]
         # No URL passed: GHOST_HANDS_START_URL opens on first perceive.
         text = text_of(call(session, "hands_perceive", {}, msg_id=3))
         assert "Tap me" in text

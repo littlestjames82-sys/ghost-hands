@@ -15,6 +15,7 @@ governed surface other tools leave raw:
 - ``hands_run`` — run scripted steps through a full Runner. The body is
   the tool's ``driver`` argument, or the session body when omitted.
 - ``hands_trail`` — return this session's trail and accounting.
+- ``hands_verify_trail`` — verify a trail's hash chain (v1.2).
 
 Session configuration is per-server-process, via the environment —
 switching bodies or approvers means starting a new server process:
@@ -77,7 +78,9 @@ SERVER_INSTRUCTIONS = (
     "the numbered element map, then call hands_act for one action at "
     "a time using only element numbers from the most recent map, or "
     "hands_run for a deterministic scripted sequence, and use "
-    "hands_trail to audit what actually happened. Every action is "
+    "hands_trail to audit what actually happened and "
+    "hands_verify_trail to prove a trail's hash chain is untampered. "
+    "Every action is "
     "classified before it runs (readonly, write, or consequential) "
     "and recorded in the provenance trail before it executes. "
     "Consequential actions need approval: with no approver configured "
@@ -158,6 +161,7 @@ TOOLS = [
                 "driver": {"type": "string", "description": "Which body executes the run: 'fake' (built-in demo web), 'chromium' (real browser), 'simphone' or 'android' (phone bodies). Defaults to the session body from GHOST_HANDS_DRIVER."},
                 "goal": {"type": "string", "description": "A short statement of what the run is trying to achieve. Recorded in the trail as the run's purpose."},
                 "approve_all": {"type": "boolean", "description": "When true, approval-gated steps in this run are approved without asking the approver channel. Only set it when the operator has explicitly authorized the whole run."},
+                "require_verify": {"type": "boolean", "description": "When true, a 'done' step is rejected until a verify step has passed in the same run: success must be proven, not claimed."},
             },
             "required": ["steps"],
         },
@@ -172,6 +176,22 @@ TOOLS = [
         "name": "hands_trail",
         "description": "Return this session's provenance trail: every decision and action recorded before execution, in order, with per-run accounting (steps, actions by class, stop reason). Read-only and local to this server session. Use it to audit what the hands actually did, or as the source for exporting a replayable script.",
         "inputSchema": {"type": "object", "properties": {}},
+        "annotations": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+    },
+    {
+        "name": "hands_verify_trail",
+        "description": "Verify the tamper-evident hash chain of a Ghost Hands trail (v1.0+): returns ok=true only if every event's SHA-256 chain link checks out, with the first broken event named when it does not. Pass 'events' (a trail as returned by hands_trail) or omit it to verify this session's own trail. A trail written before hash chaining is reported as legacy, never passed. Read-only; nothing is executed.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "events": {"type": "array", "items": {"type": "object"}, "description": "Trail events to verify. Omit to verify this session's trail."},
+            },
+        },
         "annotations": {
             "readOnlyHint": True,
             "destructiveHint": False,
@@ -501,6 +521,7 @@ def _run(session: HandsSession, args: dict) -> dict:
             trail=trail,
             start_url=start_url,
             plan_cache=cache,
+            require_verify=bool(args.get("require_verify")),
         )
         report = runner.run(args.get("goal", ""))
     finally:
@@ -517,11 +538,26 @@ def _trail(session: HandsSession, args: dict) -> dict:
     return _text(json.dumps(payload, indent=2))
 
 
+def _verify_trail(session: HandsSession, args: dict) -> dict:
+    events = args.get("events")
+    if events is None:
+        events = session.trail.events
+    if not isinstance(events, list) or not all(
+        isinstance(ev, dict) for ev in events
+    ):
+        return _text(
+            "ERROR: 'events' must be an array of trail event objects.",
+            is_error=True,
+        )
+    return _text(json.dumps(verify_trail(events), indent=2))
+
+
 _TOOL_FUNCS = {
     "hands_perceive": _perceive,
     "hands_act": _act,
     "hands_run": _run,
     "hands_trail": _trail,
+    "hands_verify_trail": _verify_trail,
 }
 
 

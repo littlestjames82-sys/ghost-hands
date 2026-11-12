@@ -225,11 +225,26 @@ class OpenAICompatibleDecider:
         model: Optional[str] = None,
         api_key: Optional[str] = None,
         timeout: float = 30.0,
+        batch: Optional[bool] = None,
     ) -> None:
         self.base_url = (base_url or os.environ.get("GHOST_HANDS_BASE_URL") or "").rstrip("/")
         self.api_key = api_key or os.environ.get("GHOST_HANDS_API_KEY") or ""
         self.model = model or os.environ.get("GHOST_HANDS_MODEL") or "gpt-4o-mini"
         self.timeout = timeout
+        # v1.2: batch mode lets one model call return several actions
+        # (the Runner still governs, approves, and records each one
+        # individually, re-perceiving between them). Opt-in: batching
+        # trades per-step model judgment for fewer calls.
+        if batch is None:
+            batch = (os.environ.get("GHOST_HANDS_BATCH") or "").strip().lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        self.batch = batch
+        # v1.2: real token accounting, accumulated from API responses
+        # that carry a usage object (ignored silently when absent).
+        self.usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
         if not self.base_url:
             raise HandsError(
                 "GHOST_HANDS_BASE_URL is not set; the OpenAI-compatible decider "
@@ -242,12 +257,35 @@ class OpenAICompatibleDecider:
             )
 
     def decide(self, goal: str, element_map: ElementMap, history: list[dict]) -> Action:
+        return self._request_actions(goal, element_map, history, want_batch=False)[0]
+
+    def decide_batch(
+        self, goal: str, element_map: ElementMap, history: list[dict]
+    ) -> list[Action]:
+        """v1.2: one model call, several actions — used by the Runner
+        only when this decider was built with batch=True. Each returned
+        action is still governed, approved, and recorded individually;
+        the batch is a cost optimization, never a governance bypass."""
+        return self._request_actions(goal, element_map, history, want_batch=True)
+
+    def _request_actions(
+        self, goal: str, element_map: ElementMap, history: list[dict], want_batch: bool
+    ) -> list[Action]:
         recent = history[-5:]
         user = (
             f"Goal: {goal}\n\nPage: {element_map.url}\n"
             f"Elements:\n{element_map.render_focused(goal)}\n\n"
             f"Recent actions: {json.dumps(recent)}\n\nNext action JSON:"
         )
+        if want_batch:
+            user += (
+                ' You may instead return {"actions": [ ... ]} with up to'
+                " 5 actions when the next steps are obvious from this"
+                " page (for example filling several fields of one form)."
+                " Every action is still checked and approved on its own"
+                " before it runs, and the page is re-read between them,"
+                " so batch only steps you are confident about."
+            )
         body = {
             "model": self.model,
             "messages": [
@@ -281,6 +319,12 @@ class OpenAICompatibleDecider:
             raise
         except Exception as exc:  # network or HTTP failure: fail honestly
             raise HandsError(f"decider request failed: {exc}") from exc
+        usage = payload.get("usage") or {}
+        self.usage["calls"] += 1
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int) and value >= 0:
+                self.usage[key] += value
         try:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
@@ -289,6 +333,12 @@ class OpenAICompatibleDecider:
         if not match:
             raise HandsError(f"decider did not return a JSON action: {content[:120]!r}")
         try:
-            return Action.from_dict(json.loads(match.group(0)))
+            parsed = json.loads(match.group(0))
+            if isinstance(parsed, dict) and isinstance(parsed.get("actions"), list):
+                actions = [Action.from_dict(item) for item in parsed["actions"][:5]]
+                if not actions:
+                    raise ValueError("empty actions list")
+                return actions
+            return [Action.from_dict(parsed)]
         except (ValueError, TypeError) as exc:
             raise HandsError(f"decider returned an invalid action: {exc}") from exc

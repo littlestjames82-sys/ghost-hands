@@ -51,7 +51,13 @@ def test_notification_gets_no_response():
 def test_tools_list():
     resp = call(HandsSession(), "tools/list")
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == ["hands_perceive", "hands_act", "hands_run", "hands_trail"]
+    assert names == [
+        "hands_perceive",
+        "hands_act",
+        "hands_run",
+        "hands_trail",
+        "hands_verify_trail",
+    ]
 
 
 def test_tools_list_annotations():
@@ -78,6 +84,12 @@ def test_tools_list_annotations():
             "openWorldHint": True,
         },
         "hands_trail": {
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "hands_verify_trail": {
             "readOnlyHint": True,
             "destructiveHint": False,
             "idempotentHint": True,

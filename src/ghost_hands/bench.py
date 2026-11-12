@@ -427,7 +427,13 @@ def case_mcp_tools_list():
     s = HandsSession()
     resp = handle_request(s, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
     names = [t["name"] for t in resp["result"]["tools"]]
-    assert names == ["hands_perceive", "hands_act", "hands_run", "hands_trail"]
+    assert names == [
+        "hands_perceive",
+        "hands_act",
+        "hands_run",
+        "hands_trail",
+        "hands_verify_trail",
+    ]
 
 
 def case_mcp_perceive_and_act():
@@ -2747,6 +2753,74 @@ def case_v11_focused_render():
     assert big.render_focused("checkout") == big.render()
 
 
+def case_v12_batch_one_call_three_actions():
+    server, base = _start_stub(
+        [
+            {
+                "actions": [
+                    {"kind": "type", "target": 1, "text": "ghost"},
+                    {"kind": "click", "target": 2},
+                    {"kind": "done", "summary": "batch finished"},
+                ]
+            }
+        ]
+    )
+    try:
+        decider = OpenAICompatibleDecider(
+            base_url=base, api_key="stub", model="stub-1", batch=True
+        )
+        trail = Trail()
+        report = Runner(FakeDriver(DEMO_PAGES), decider, trail=trail).run(
+            "search the demo web"
+        )
+        assert report.stop_reason == "done", report.summary
+        assert len(_StubLLMHandler.seen) == 1, _StubLLMHandler.seen
+        governs = [ev for ev in trail.events if ev.get("type") == "govern"]
+        assert len(governs) == 2  # every batched action governed on its own
+        assert report.llm_calls == 1
+    finally:
+        server.shutdown()
+
+
+def case_v12_usage_accounting_real_tokens():
+    server, base = _start_stub(
+        [
+            {"kind": "type", "target": 1, "text": "ghost"},
+            {"kind": "click", "target": 2},
+            {"kind": "done", "summary": "counted"},
+        ]
+    )
+    try:
+        decider = OpenAICompatibleDecider(
+            base_url=base, api_key="stub", model="stub-1"
+        )
+        report = Runner(FakeDriver(DEMO_PAGES), decider, trail=Trail()).run(
+            "search the demo web"
+        )
+        assert report.stop_reason == "done", report.summary
+        # The stub reports usage {prompt: 1, completion: 1} per call.
+        assert report.llm_calls == 3, report
+        assert report.llm_prompt_tokens == 3
+        assert report.llm_completion_tokens == 3
+    finally:
+        server.shutdown()
+
+
+def case_v12_require_verify_gate():
+    steps = [
+        {"kind": "done", "summary": "trust me"},
+        {"kind": "verify", "url": "demo.local"},
+        {"kind": "done", "summary": "proven"},
+    ]
+    driver = FakeDriver(DEMO_PAGES)
+    runner = Runner(
+        driver, ScriptedDecider(steps), trail=Trail(), require_verify=True
+    )
+    report = runner.run("bench require verify")
+    assert report.stop_reason == "done", report.summary
+    assert report.summary == "proven"
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -2786,7 +2860,7 @@ CASES = [
     ("export: script encodes the same steps", case_export_encodes_steps),
     ("export: script is a Ghost Hands script", case_export_is_ghost_hands_script),
     ("mcp: initialize handshake", case_mcp_initialize),
-    ("mcp: tools/list exposes the four tools", case_mcp_tools_list),
+    ("mcp: tools/list exposes the five tools", case_mcp_tools_list),
     ("mcp: perceive + act + trail", case_mcp_perceive_and_act),
     ("rules: 'go to' navigates", case_rule_go_to),
     ("rules: 'click <text>' clicks the match", case_rule_click),
@@ -2848,6 +2922,9 @@ CASES = [
     ("v10 verify: passes on the real result; a false claim stops the run", case_v10_verify_gate),
     ("v10 cache: proven plan replays with zero decider calls", case_v10_cache_replay),
     ("v11 focused render: the goal's element survives the budget cut", case_v11_focused_render),
+    ("v12 batch: one model call, three actions, each governed on its own", case_v12_batch_one_call_three_actions),
+    ("v12 accounting: API-reported tokens land on the run report", case_v12_usage_accounting_real_tokens),
+    ("v12 require-verify: done is rejected until a verify passes", case_v12_require_verify_gate),
 ]
 
 
