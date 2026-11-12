@@ -28,7 +28,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
-from .trail import EVENT_TYPES, accounting
+from .trail import EVENT_TYPES, accounting, verify_trail
 
 _VALUE_CAP = 80
 _BULLETS = "••••"
@@ -287,6 +287,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
         "dialogs": dialogs,
         "net_events": net_events,
         "event_count": len(events),
+        "chain": verify_trail(events),
     }
 
 
@@ -497,6 +498,23 @@ def render_report(events: list[dict[str, Any]], skipped: int = 0) -> str:
             f'<p class="sub">{esc(info["started"])} → {esc(info["ended"])} '
             f'({esc(info["duration"])})</p>'
         )
+    chain = info["chain"]
+    if chain["ok"]:
+        chain_note = (
+            f'Trail integrity: <b>hash chain intact</b> '
+            f'({chain["hashed"]} chained events, v1.0+)'
+        )
+    elif not chain["hashed"]:
+        chain_note = (
+            "Trail integrity: <b>legacy trail</b> — written before "
+            "hash chaining (v1.0); integrity cannot be proven"
+        )
+    else:
+        chain_note = (
+            f'Trail integrity: <b>CHAIN BROKEN</b> at event '
+            f'{chain.get("first_bad")}: {esc(str(chain.get("reason", "")))}'
+        )
+    out.append(f'<p class="sub">{chain_note}</p>')
     if info["stop_reason"]:
         out.append(
             f'<span class="stop">stopped: {esc(info["stop_reason"])}'

@@ -8,6 +8,7 @@ what the trail records, so one perception serves all three.
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Optional
@@ -363,6 +364,63 @@ class ElementMap:
                 break
             lines.append(line)
             used += len(line) + 1
+        return "\n".join(lines)
+
+    def render_focused(self, goal: str, budget: Optional[int] = None) -> str:
+        """Render the map for a *goal*, spending the char budget on the
+        elements most likely to matter (v1.1).
+
+        Plain :meth:`render` walks the page in order and truncates the
+        tail — on a big page the checkout button can sit past the cut
+        while the model pays tokens for a nav menu. Here, when the full
+        map fits the budget this returns exactly what render() returns;
+        when it does not, elements are scored by overlap between the
+        goal's words and their name/tag/type/href, the best-scoring ones
+        are kept, and the kept lines still print in page order under
+        their original numbers (an action's target number never
+        changes meaning)."""
+        limit = self.budget if budget is None else budget
+        full = self.render(budget=10 ** 9)
+        if len(full) <= limit:
+            return self.render(budget=limit)
+        words = {
+            w
+            for w in re.findall(r"[a-z0-9]+", (goal or "").lower())
+            if len(w) >= 3
+        }
+
+        def line_for(el: Element) -> str:
+            line = f'[{el.number}] <{el.tag}> "{el.name}"'
+            if el.type:
+                line += f" type={el.type}"
+            if el.href:
+                line += f" href={el.href}"
+            if el.frame:
+                line += f" frame={el.frame}"
+            return line
+
+        def score(el: Element) -> int:
+            hay = f"{el.name} {el.tag} {el.type or ''} {el.href or ''}".lower()
+            return sum(1 for w in words if w in hay)
+
+        ranked = sorted(self.elements, key=lambda el: (-score(el), el.number))
+        kept: list[Element] = []
+        used = 0
+        reserve = 90  # room for the omission note
+        for el in ranked:
+            cost = len(line_for(el)) + 1
+            if used + cost + reserve > limit and kept:
+                continue
+            kept.append(el)
+            used += cost
+        kept.sort(key=lambda el: el.number)
+        lines = [line_for(el) for el in kept]
+        omitted = len(self.elements) - len(kept)
+        if omitted:
+            lines.append(
+                f"… focused: {omitted} element(s) not shown "
+                f"(goal-relevant kept; map budget {limit} chars)"
+            )
         return "\n".join(lines)
 
     def signature(self) -> str:

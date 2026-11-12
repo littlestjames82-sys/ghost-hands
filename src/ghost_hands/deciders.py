@@ -245,7 +245,7 @@ class OpenAICompatibleDecider:
         recent = history[-5:]
         user = (
             f"Goal: {goal}\n\nPage: {element_map.url}\n"
-            f"Elements:\n{element_map.render()}\n\n"
+            f"Elements:\n{element_map.render_focused(goal)}\n\n"
             f"Recent actions: {json.dumps(recent)}\n\nNext action JSON:"
         )
         body = {

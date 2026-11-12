@@ -43,8 +43,9 @@ from .export import export_ghost_hands_script
 from .eyes import ElementMap
 from .governor import Governor, Policy, classify
 from .mcp_server import HandsSession, handle_request
+from .cache import PlanCache
 from .runner import Runner
-from .trail import Trail, accounting
+from .trail import Trail, accounting, verify_trail
 
 SKIP = "SKIP"
 
@@ -101,13 +102,15 @@ def _el(html: str, text: str):
     return m, el
 
 
-def _run(pages, steps, approver=None, policy=None, start=None):
+def _run(pages, steps, approver=None, policy=None, start=None, secrets=None,
+         cache=None, goal="bench"):
     driver = FakeDriver(pages, start_url=start)
     trail = Trail()
     runner = Runner(
-        driver, ScriptedDecider(steps), approver=approver, policy=policy, trail=trail
+        driver, ScriptedDecider(steps), approver=approver, policy=policy,
+        trail=trail, secrets=secrets, plan_cache=cache,
     )
-    report = runner.run("bench")
+    report = runner.run(goal)
     return driver, trail, report
 
 
@@ -2651,6 +2654,99 @@ def case_phone_proof_fake_bridge():
     return True
 
 
+# ---------------------------------------------------------------------------
+# v1.0 / v1.1 — trust + cost features
+# ---------------------------------------------------------------------------
+
+
+def case_v10_trail_chain():
+    _, trail, report = _run(DEMO_PAGES, demo_steps())
+    assert report.stop_reason == "done", report.summary
+    verdict = verify_trail(trail.events)
+    assert verdict["ok"] and verdict["hashed"] == len(trail.events), verdict
+    tampered = [dict(ev) for ev in trail.events]
+    tampered[1]["type"] = "forged"
+    assert verify_trail(tampered)["ok"] is False
+
+
+def case_v10_secret_login():
+    steps = [
+        {"kind": "type", "target": 1, "text": "ryan"},
+        {"kind": "type", "target": 2, "text": "{{secret:APP_PASSWORD}}"},
+        {"kind": "click", "target": 3},
+        {"kind": "done", "summary": "logged in"},
+    ]
+    driver, trail, report = _run(
+        LOGIN_PAGES, steps, approver=lambda a: True,
+        secrets={"APP_PASSWORD": "hunter2"},
+    )
+    assert report.stop_reason == "done", report.summary
+    fields = driver.submissions[0]["fields"]
+    assert fields.get("pass") == "hunter2"
+    assert "hunter2" not in json.dumps(trail.events)
+
+
+def case_v10_verify_gate():
+    steps = [
+        {"kind": "type", "target": 1, "text": "ryan"},
+        {"kind": "type", "target": 2, "text": "hunter2"},
+        {"kind": "click", "target": 3},
+        {"kind": "verify", "text": "Welcome"},
+        {"kind": "done", "summary": "logged in and verified"},
+    ]
+    _, _, report = _run(LOGIN_PAGES, steps, approver=lambda a: True)
+    assert report.stop_reason == "done", report.summary
+    bad = [dict(s) for s in steps]
+    bad[3] = {"kind": "verify", "text": "Admin console"}
+    _, _, report2 = _run(LOGIN_PAGES, bad, approver=lambda a: True)
+    assert report2.stop_reason == "error", report2.summary
+    assert "verification failed" in report2.summary
+
+
+def case_v10_cache_replay():
+    cache = PlanCache()
+    _, _, report1 = _run(
+        DEMO_PAGES, demo_steps(), cache=cache, goal="bench cache flow"
+    )
+    assert report1.stop_reason == "done", report1.summary
+    # Second run: an empty script — if the decider is consulted at all
+    # the run errors out, so success proves the cache drove it.
+    _, trail2, report2 = _run(
+        DEMO_PAGES, [], cache=cache, goal="bench cache flow"
+    )
+    assert report2.stop_reason == "done", report2.summary
+    assert report2.steps > 0
+    assert any(
+        ev.get("type") == "cache" and ev.get("phase") == "hit"
+        for ev in trail2.events
+    )
+    assert all(
+        ev.get("source") == "cache"
+        for ev in trail2.events
+        if ev.get("type") == "decide"
+    )
+
+
+def case_v11_focused_render():
+    links = "".join(
+        f'<a href="https://x.local/p{i}">Reference page {i}</a>'
+        for i in range(40)
+    )
+    html = (
+        f"<html><body>{links}"
+        '<button>Checkout now</button></body></html>'
+    )
+    m = ElementMap.from_html(html, budget=400)
+    plain = m.render()
+    assert "Checkout now" not in plain  # tail truncated away
+    focused = m.render_focused("proceed to checkout")
+    assert "Checkout now" in focused
+    assert "focused:" in focused
+    # When everything fits, focused render is the plain render.
+    big = ElementMap.from_html(html, budget=100_000)
+    assert big.render_focused("checkout") == big.render()
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -2747,6 +2843,11 @@ CASES = [
     ("v8 seatbelt pack: injection-shaped trap click denied at the governor; benign neighbour runs", case_seatbelt_trap_denied),
     ("v9 doctor: full local stack green (chromium + fake bridge + local bus + packs)", case_doctor_local_stack),
     ("v9 phone-proof: guided proof completes against the fake bridge with a simulated approval", case_phone_proof_fake_bridge),
+    ("v10 trail: hash chain verifies intact; a forged event breaks it", case_v10_trail_chain),
+    ("v10 secrets: placeholder login lands the real value; trail never holds it", case_v10_secret_login),
+    ("v10 verify: passes on the real result; a false claim stops the run", case_v10_verify_gate),
+    ("v10 cache: proven plan replays with zero decider calls", case_v10_cache_replay),
+    ("v11 focused render: the goal's element survives the budget cut", case_v11_focused_render),
 ]
 
 

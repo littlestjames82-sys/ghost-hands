@@ -6,7 +6,31 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [1.0.0] — 2026-11-11 (built + verified locally; release pending Ryan's gate)
+## [Unreleased] — v1.1 in development (on GitHub main; release is Ryan's gate)
+
+- **Focused perception.** New `ElementMap.render_focused(goal)`:
+  when a page's map exceeds the char budget, elements are scored by
+  overlap between the goal's words and their name/tag/type/href and
+  the goal-relevant ones are kept — still printed in page order under
+  their original numbers, with an explicit "focused:" omission note.
+  When the full map fits, the output is byte-identical to `render()`.
+  The OpenAI-compatible decider now perceives through it, so the
+  model stops paying tokens for nav menus while the action target
+  sits past the old truncation cut.
+- **Integrity everywhere.** The HTML audit report header now carries
+  the trail's hash-chain verdict (intact with the chained-event
+  count / legacy / CHAIN BROKEN at the first bad event), and the MCP
+  `hands_trail` tool returns `trail_integrity` alongside the events.
+- **Plan cache over MCP.** `hands_run` honors `GHOST_HANDS_CACHE`:
+  proven plans store and replay through the full Governor with zero
+  decider calls, same as the CLI's `--cache`.
+- **Bench proof for the v1.0 features** (the bench is the project's
+  public proof suite): five new cases — hash chain intact/forged,
+  placeholder login with the value absent from the trail, verify
+  passing on a real result and stopping a false claim, cache replay
+  with zero decider calls, and the focused-render budget case.
+
+## [1.0.0] — 2026-11-11
 
 The trust-and-cost release. No new dependencies; the hard rule
 stands (own stdlib CDP client, no Playwright/Selenium anywhere).

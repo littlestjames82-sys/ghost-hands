@@ -30,15 +30,16 @@ MIT licensed.
 
 MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 
-> Status: v0.9.4 — live on PyPI and GitHub:
+> Status: v1.0.0 — live on PyPI and GitHub:
 > [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
 > (`pip install ghost-hands`) ·
 > [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
 > [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
 >
-> **v1.0.0 is built and verified locally** (full pytest suite + 95/95
-> bench on the v1.0 tree) and is awaiting its release gate — the
-> published package is still the version above until that ships.
+> On GitHub `main`, the v1.1 wave is in development (focused
+> perception, report/MCP trail-integrity surfacing, MCP plan cache,
+> bench proof cases for the v1.0 features) — see the CHANGELOG's
+> Unreleased section. Its release is a separate gate.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release

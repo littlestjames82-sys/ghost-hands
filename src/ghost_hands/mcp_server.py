@@ -31,6 +31,9 @@ switching bodies or approvers means starting a new server process:
 - ``GHOST_HANDS_START_URL``: opened by the session body on the first
   perceive when the caller passes no URL (chromium / android /
   simphone sessions).
+- ``GHOST_HANDS_CACHE`` (v1.1): path to a governed plan-cache file;
+  ``hands_run`` then stores proven plans and replays them through the
+  full Governor with zero decider calls (see ``ghost_hands.cache``).
 - ``GHOST_HANDS_APPROVER`` (phone, v0.8): route "ask" verdicts through
   ``PhoneApprover`` — Ryan's phone decides via the MrGhosty bridge.
   Unset (the default): asks are denied with an explanation.
@@ -55,7 +58,7 @@ from .governor import ASK, Governor
 from .policies import load_pack
 from .runner import Runner
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
-from .trail import Trail
+from .trail import Trail, verify_trail
 from .verify import evaluate_verify
 
 from . import __version__ as _pkg_version
@@ -484,6 +487,12 @@ def _run(session: HandsSession, args: dict) -> dict:
     else:
         driver = make_driver(kind)
     try:
+        cache = None
+        cache_path = os.environ.get("GHOST_HANDS_CACHE") or ""
+        if cache_path.strip():
+            from .cache import PlanCache
+
+            cache = PlanCache(path=cache_path.strip())
         runner = Runner(
             driver,
             decider,
@@ -491,6 +500,7 @@ def _run(session: HandsSession, args: dict) -> dict:
             approver=approver,
             trail=trail,
             start_url=start_url,
+            plan_cache=cache,
         )
         report = runner.run(args.get("goal", ""))
     finally:
@@ -502,6 +512,7 @@ def _trail(session: HandsSession, args: dict) -> dict:
     payload = {
         "events": session.trail.events,
         "accounting": session.trail.accounting(),
+        "trail_integrity": verify_trail(session.trail.events),
     }
     return _text(json.dumps(payload, indent=2))
 
