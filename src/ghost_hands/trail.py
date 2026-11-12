@@ -50,6 +50,9 @@ EVENT_TYPES = (
     # v1.0: a governed plan-cache event. Fields: phase ("hit" |
     # "fallback" | "store"), key, remaining (on hits).
     "cache",
+    # v1.3: a stuck run used its recovery chance instead of stopping.
+    # Fields: reason, attempt.
+    "recovery",
 )
 
 GENESIS = "genesis"

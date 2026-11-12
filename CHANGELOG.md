@@ -6,7 +6,34 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 + v1.3 in development (on GitHub main; release is Ryan's gate)
+
+The finish-the-job release (v1.3 wave):
+
+- **Governed recovery.** A run that goes stuck (unchanged map or a
+  repeated action) no longer has to die there: it gets one governed
+  second chance by default (`recovery_attempts`) — stuck counters
+  reset, any stale batch is dropped, the decider is told in its own
+  history what stalled and to change approach, and a `recovery`
+  event is written into the hash-chained trail. Exhausted chances
+  end in the same honest stuck stop as before; `0` disables it.
+- **LLM token budget cap.** `Runner(max_llm_tokens=...)`, the CLI's
+  `--max-llm-tokens`, and `hands_run`'s `max_llm_tokens` stop a run
+  with reason `budget` once API-reported spend reaches the cap —
+  checked between steps, never mid-action, so the trail always
+  closes cleanly. (Published failure analysis blames cost caps for
+  most benchmark run deaths; here the cap is a governor, with the
+  plan cache making the retry cheap.)
+- **Goal-driven `hands_run`.** With `GHOST_HANDS_DECIDER=openai`,
+  an MCP client passes a bare `goal` and the server's own
+  OpenAI-compatible decider drives it under the same Governor,
+  approvals, and trail — Ghost Hands as a complete agent over MCP,
+  not only a step executor.
+- **Publishable eval scorecard.** `ghost-hands eval --scorecard
+  FILE.md` renders the graded suites as markdown with each decider
+  reported separately and labeled for what it proves: stub =
+  harness verification, rules = no-LLM floor, real model only when
+  one actually ran. Never blended into a single headline number.
 
 The measured-cost release: fewer model calls, real token numbers,
 and success that must be proven when the operator says so.

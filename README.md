@@ -40,10 +40,12 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > report and the MCP trail tool, the plan cache over MCP, and bench
 > proof cases for the v1.0 features — see the CHANGELOG.
 >
-> On GitHub `main`, the v1.2 wave is in development: batched model
-> calls with per-action governance, real API-reported token
-> accounting, the require-verify gate, and a fifth MCP tool
-> (`hands_verify_trail`). Its release is a separate gate.
+> On GitHub `main`, the v1.2 + v1.3 waves are in development:
+> batched model calls with per-action governance, real API-reported
+> token accounting, the require-verify gate, a fifth MCP tool
+> (`hands_verify_trail`), governed recovery from stuck, an LLM
+> token budget cap, goal-driven `hands_run` over MCP, and a
+> publishable eval scorecard. Their release is a separate gate.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release

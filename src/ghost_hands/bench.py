@@ -2806,6 +2806,68 @@ def case_v12_usage_accounting_real_tokens():
         server.shutdown()
 
 
+def case_v13_recovery_second_chance():
+    steps = [{"kind": "extract"}] * 4 + [
+        {"kind": "verify", "url": "demo.local"},
+        {"kind": "done", "summary": "recovered"},
+    ]
+    trail = Trail()
+    report = Runner(
+        FakeDriver(DEMO_PAGES), ScriptedDecider(steps), trail=trail
+    ).run("bench recovery")
+    assert report.stop_reason == "done", report.summary
+    assert report.summary == "recovered"
+    assert any(ev.get("type") == "recovery" for ev in trail.events)
+    # With recovery off, the same script dies stuck — the contrast
+    # is the feature.
+    report2 = Runner(
+        FakeDriver(DEMO_PAGES),
+        ScriptedDecider([{"kind": "extract"}] * 5),
+        trail=Trail(),
+        recovery_attempts=0,
+    ).run("bench recovery off")
+    assert report2.stop_reason == "stuck", report2.summary
+
+
+def case_v13_token_budget_cap():
+    server, base = _start_stub(
+        [
+            {"kind": "type", "target": 1, "text": "ghost"},
+            {"kind": "click", "target": 2},
+            {"kind": "done", "summary": "never reached"},
+        ]
+    )
+    try:
+        decider = OpenAICompatibleDecider(
+            base_url=base, api_key="stub", model="stub-1"
+        )
+        # The stub reports 2 tokens per call; a cap of 3 lets two
+        # calls through and stops the run before the third decide.
+        report = Runner(
+            FakeDriver(DEMO_PAGES),
+            decider,
+            trail=Trail(),
+            max_llm_tokens=3,
+        ).run("search the demo web")
+        assert report.stop_reason == "budget", report.summary
+        assert report.llm_calls == 2
+    finally:
+        server.shutdown()
+
+
+def case_v13_scorecard_render():
+    from . import evaluate
+
+    scores, label = evaluate.run_eval(
+        "rules", task_names=["form-fill-and-submit"]
+    )
+    payload = evaluate.suite_json(scores, label, ["bench-generated"])
+    card = evaluate.render_scorecard([payload])
+    assert "eval scorecard" in card
+    assert "never averaged" in card
+    assert "form-fill-and-submit" in card
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -2925,6 +2987,9 @@ CASES = [
     ("v12 batch: one model call, three actions, each governed on its own", case_v12_batch_one_call_three_actions),
     ("v12 accounting: API-reported tokens land on the run report", case_v12_usage_accounting_real_tokens),
     ("v12 require-verify: done is rejected until a verify passes", case_v12_require_verify_gate),
+    ("v13 recovery: a stuck run gets one governed second chance", case_v13_recovery_second_chance),
+    ("v13 budget: the LLM token cap stops the run between steps", case_v13_token_budget_cap),
+    ("v13 scorecard: eval renders an honest markdown scorecard", case_v13_scorecard_render),
 ]
 
 

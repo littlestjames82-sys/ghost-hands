@@ -35,6 +35,10 @@ switching bodies or approvers means starting a new server process:
 - ``GHOST_HANDS_CACHE`` (v1.1): path to a governed plan-cache file;
   ``hands_run`` then stores proven plans and replays them through the
   full Governor with zero decider calls (see ``ghost_hands.cache``).
+- ``GHOST_HANDS_DECIDER=openai`` (v1.3): ``hands_run`` accepts a bare
+  ``goal`` with no ``steps`` — the server's own OpenAI-compatible
+  decider (configured by ``GHOST_HANDS_BASE_URL`` / ``GHOST_HANDS_MODEL``
+  / ``GHOST_HANDS_API_KEY``) drives the run under the same Governor.
 - ``GHOST_HANDS_APPROVER`` (phone, v0.8): route "ask" verdicts through
   ``PhoneApprover`` — Ryan's phone decides via the MrGhosty bridge.
   Unset (the default): asks are denied with an explanation.
@@ -155,15 +159,16 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "steps": {"type": "array", "description": "The steps to execute in order. Each step is an action object like hands_act takes, optionally preceded by perceive steps; the Runner stops according to the session's stop rules and reports why."},
+                "steps": {"type": "array", "description": "The steps to execute in order. Each step is an action object like hands_act takes, optionally preceded by perceive steps; the Runner stops according to the session's stop rules and reports why. Omit only in goal-driven mode (GHOST_HANDS_DECIDER=openai), where 'goal' drives the run instead."},
                 "pages": {"type": "object", "description": "A fake web to install for this run (same shape as hands_perceive's 'pages'). Used with driver 'fake'."},
                 "start_url": {"type": "string", "description": "Page to open before the first step runs."},
                 "driver": {"type": "string", "description": "Which body executes the run: 'fake' (built-in demo web), 'chromium' (real browser), 'simphone' or 'android' (phone bodies). Defaults to the session body from GHOST_HANDS_DRIVER."},
                 "goal": {"type": "string", "description": "A short statement of what the run is trying to achieve. Recorded in the trail as the run's purpose."},
                 "approve_all": {"type": "boolean", "description": "When true, approval-gated steps in this run are approved without asking the approver channel. Only set it when the operator has explicitly authorized the whole run."},
                 "require_verify": {"type": "boolean", "description": "When true, a 'done' step is rejected until a verify step has passed in the same run: success must be proven, not claimed."},
+                "max_llm_tokens": {"type": "integer", "description": "Goal-driven mode only: stop the run (reason 'budget') once the decider's API-reported token spend reaches this cap; checked between steps, never mid-action."},
             },
-            "required": ["steps"],
+            "required": [],
         },
         "annotations": {
             "readOnlyHint": False,
@@ -473,12 +478,33 @@ def _run(session: HandsSession, args: dict) -> dict:
             "HTML strings.",
             is_error=True,
         )
-    steps = args["steps"]
+    # v1.3: goal-driven mode — with GHOST_HANDS_DECIDER=openai the
+    # server's own LLM decider drives from 'goal' and 'steps' is
+    # omitted. Scripted mode (the default) still requires steps.
+    llm_mode = (
+        (os.environ.get("GHOST_HANDS_DECIDER") or "").strip().lower() == "openai"
+    )
+    steps = args.get("steps")
+    if steps is None and llm_mode:
+        steps = []
     if not isinstance(steps, list) or not all(
         isinstance(s, dict) for s in steps
     ):
         return _text(
-            "ERROR: 'steps' must be an array of action objects.",
+            "ERROR: 'steps' must be an array of action objects "
+            "(omit it only in goal-driven mode, GHOST_HANDS_DECIDER=openai).",
+            is_error=True,
+        )
+    if steps and llm_mode:
+        return _text(
+            "ERROR: this server runs goal-driven (GHOST_HANDS_DECIDER="
+            "openai); pass 'goal' without 'steps', or unset the env var "
+            "for scripted runs.",
+            is_error=True,
+        )
+    if llm_mode and not str(args.get("goal") or "").strip():
+        return _text(
+            "ERROR: goal-driven mode needs a non-empty 'goal'.",
             is_error=True,
         )
     kind = (args.get("driver") or session.driver_kind or "fake").strip().lower()
@@ -491,7 +517,15 @@ def _run(session: HandsSession, args: dict) -> dict:
     start_url = args.get("start_url") or session.start_url
     trail = Trail()
     approver = None
-    decider = ScriptedDecider(steps)
+    if llm_mode:
+        from .deciders import OpenAICompatibleDecider
+
+        try:
+            decider = OpenAICompatibleDecider()
+        except HandsError as exc:
+            return _text(f"ERROR: {exc}", is_error=True)
+    else:
+        decider = ScriptedDecider(steps)
     if args.get("approve_all"):
         approver = lambda action: True  # explicit client opt-in
     elif session.approver_channel == "phone":
@@ -522,6 +556,11 @@ def _run(session: HandsSession, args: dict) -> dict:
             start_url=start_url,
             plan_cache=cache,
             require_verify=bool(args.get("require_verify")),
+            max_llm_tokens=(
+                int(args["max_llm_tokens"])
+                if isinstance(args.get("max_llm_tokens"), int)
+                else None
+            ),
         )
         report = runner.run(args.get("goal", ""))
     finally:

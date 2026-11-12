@@ -157,6 +157,8 @@ def cmd_run(args) -> int:
         start_url=start if args.driver in ("chromium", "android", "simphone") else None,
         plan_cache=plan_cache,
         require_verify=bool(getattr(args, "require_verify", False)),
+        max_llm_tokens=getattr(args, "max_llm_tokens", None),
+        recovery_attempts=int(getattr(args, "recovery_attempts", 1)),
     )
     try:
         report = runner.run(args.goal or "")
@@ -366,6 +368,11 @@ def cmd_eval(args) -> int:
             json.dumps(payload, indent=2), encoding="utf-8"
         )
         print(f"eval report written to {args.report}")
+    if getattr(args, "scorecard", None) and payloads:
+        Path(args.scorecard).write_text(
+            evaluate.render_scorecard(payloads), encoding="utf-8"
+        )
+        print(f"eval scorecard written to {args.scorecard}")
     return 0
 
 
@@ -516,6 +523,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="reject a script's 'done' until a verify step has passed "
         "in the same run (v1.2): success must be proven, not claimed",
     )
+    p_run.add_argument(
+        "--max-llm-tokens",
+        type=int,
+        default=None,
+        help="stop the run (reason 'budget') once the decider's "
+        "API-reported token spend reaches this cap (v1.3); checked "
+        "between steps, never mid-action",
+    )
+    p_run.add_argument(
+        "--recovery-attempts",
+        type=int,
+        default=1,
+        help="governed second chances when a run gets stuck (v1.3; "
+        "0 disables recovery and restores the pre-1.3 stuck stop)",
+    )
 
     p_verify = sub.add_parser(
         "verify-trail",
@@ -649,6 +671,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_eval.add_argument(
         "--report",
         help="also write a JSON report to this path",
+    )
+    p_eval.add_argument(
+        "--scorecard",
+        help="also write an honest markdown scorecard to this path "
+        "(v1.3): each decider reported separately, stub labeled as "
+        "harness verification, never blended into one number",
     )
 
     p_doctor = sub.add_parser(

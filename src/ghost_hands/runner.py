@@ -102,6 +102,8 @@ class Runner:
         plan_cache: Optional[PlanCache] = None,
         secrets: Optional[SecretProvider | dict] = None,
         require_verify: bool = False,
+        recovery_attempts: int = 1,
+        max_llm_tokens: Optional[int] = None,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -119,6 +121,13 @@ class Runner:
         # v1.2: when True, a `done` claim is rejected (and the decider
         # told why) until some verify action has passed in this run.
         self.require_verify = require_verify
+        # v1.3: a stuck run gets this many governed second chances —
+        # counters reset, the decider is told what stalled, and the
+        # loop continues — before the honest stuck stop. And a hard
+        # cap on API-reported LLM tokens, checked between steps so a
+        # run never dies mid-action over budget.
+        self.recovery_attempts = recovery_attempts
+        self.max_llm_tokens = max_llm_tokens
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -160,6 +169,35 @@ class Runner:
         unchanged = 0
         verified_ok = False  # a verify action has passed in this run
         done_rejections = 0  # require_verify gate: dones sent back
+        recovery_left = self.recovery_attempts
+
+        def try_recover(step_no: int, reason: str) -> bool:
+            """v1.3: spend a recovery chance on a stuck run. Resets the
+            stuck counters, tells the decider what stalled (in its own
+            history), drops any stale batch queue, and records the
+            recovery on the trail. False when no chances remain."""
+            nonlocal recovery_left, unchanged, last_signature
+            if recovery_left <= 0:
+                return False
+            recovery_left -= 1
+            attempt = self.recovery_attempts - recovery_left
+            self.trail.record(
+                "recovery", step_no, reason=reason, attempt=attempt
+            )
+            history.append(
+                {
+                    "kind": "system",
+                    "note": f"Recovery {attempt}: the run stalled "
+                    f"({reason}). The page has been re-perceived; "
+                    "choose a different approach and do not repeat the "
+                    "action that stalled.",
+                }
+            )
+            unchanged = 0
+            last_signature = None
+            seen_actions.clear()
+            self._batch_queue = []
+            return True
 
         self._wire_event_sink()
         if self.start_url:
@@ -212,6 +250,8 @@ class Runner:
                 unchanged = 0
                 last_signature = sig
             if unchanged >= 3:
+                if try_recover(step, "element map unchanged for 3 consecutive steps"):
+                    continue
                 return self._stop(
                     report, step, "stuck", "element map unchanged for 3 consecutive steps"
                 )
@@ -288,6 +328,23 @@ class Runner:
                     )
                     if not plan_queue:
                         plan_completed = True
+            if action is None and not self._batch_queue and self.max_llm_tokens:
+                # v1.3 token budget: checked between steps (never
+                # mid-action), only when the decider reports usage.
+                usage = getattr(self.decider, "usage", None)
+                if isinstance(usage, dict) and usage.get("calls"):
+                    spent = int(usage.get("prompt_tokens") or 0) + int(
+                        usage.get("completion_tokens") or 0
+                    )
+                    if spent >= self.max_llm_tokens:
+                        return self._stop(
+                            report,
+                            step,
+                            "budget",
+                            f"LLM token budget reached: {spent} tokens "
+                            f"spent (cap {self.max_llm_tokens}); the run "
+                            "stopped between steps, on the record",
+                        )
             force_single = False
             if action is None and self._batch_queue:
                 # v1.2 batch remainder: the page has been re-perceived
@@ -375,6 +432,8 @@ class Runner:
             signature = action.signature()
             seen_actions[signature] = seen_actions.get(signature, 0) + 1
             if seen_actions[signature] > 3:
+                if try_recover(step, f"action repeated 3 times: {action.to_dict()}"):
+                    continue
                 return self._stop(
                     report, step, "stuck", f"action repeated 3 times: {action.to_dict()}"
                 )
