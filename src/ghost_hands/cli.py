@@ -281,6 +281,7 @@ def cmd_batch(args) -> int:
                 trail=trail,
                 start_url=start if shared_driver is not None else None,
                 require_verify=bool(getattr(args, "require_verify", False)),
+                max_llm_tokens=getattr(args, "max_llm_tokens", None),
             )
             try:
                 report = runner.run(str(goal))
@@ -754,6 +755,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_batch.add_argument(
         "--policy-pack",
         help="named policy pack applied to every script",
+    )
+    p_batch.add_argument(
+        "--max-llm-tokens",
+        type=int,
+        default=None,
+        help="per-script cap on API-reported LLM tokens (v1.8)",
     )
 
     p_check = sub.add_parser(

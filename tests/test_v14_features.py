@@ -111,6 +111,7 @@ def test_fallback_answers_and_usage_sums():
         "prompt_tokens": 12,
         "completion_tokens": 3,
         "calls": 2,
+        "retries": 0,
     }
 
 

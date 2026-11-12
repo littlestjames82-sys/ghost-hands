@@ -40,7 +40,7 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > report and the MCP trail tool, the plan cache over MCP, and bench
 > proof cases for the v1.0 features — see the CHANGELOG.
 >
-> On GitHub `main`, the v1.2 through v1.7 waves are in
+> On GitHub `main`, the v1.2 through v1.8 waves are in
 > development: batched model calls with per-action governance,
 > real API-reported token accounting, the require-verify gate, a
 > fifth MCP tool (`hands_verify_trail`), governed recovery from
@@ -52,9 +52,11 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > verification, a `check` preflight that classifies a script
 > before it runs, resuming a run from a dead run's trail (the
 > continuation's trail now chains to its parent's hash), a
-> native Anthropic decider, a `batch` runbook command, and a
-> doctor that reports which deciders are configured. Their
-> release is a separate gate.
+> native Anthropic decider, a `batch` runbook command, a
+> doctor that reports which deciders are configured, bounded
+> retry with backoff for flaky model endpoints (retries counted
+> in the run's accounting), and an opt-in JSON mode for stricter
+> model replies. Their release is a separate gate.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release

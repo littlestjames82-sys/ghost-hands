@@ -135,7 +135,12 @@ def test_openai_batch_parse_and_usage(monkeypatch):
     m = ElementMap.from_html(DEMO_PAGES["https://demo.local/"], url="https://demo.local/")
     actions = d.decide_batch("g", m, [])
     assert [a.kind for a in actions] == ["extract", "done"]
-    assert d.usage == {"prompt_tokens": 120, "completion_tokens": 7, "calls": 1}
+    assert d.usage == {
+        "prompt_tokens": 120,
+        "completion_tokens": 7,
+        "calls": 1,
+        "retries": 0,
+    }
 
 
 def test_usage_lands_on_report_trail_and_html_summary(monkeypatch):

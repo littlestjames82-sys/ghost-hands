@@ -69,6 +69,9 @@ class RunReport:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     llm_calls: int = 0
+    # v1.8: transient-failure retries the decider spent (see
+    # deciders._post_json); part of the run's true cost story.
+    llm_retries: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -84,6 +87,7 @@ class RunReport:
             "llm_prompt_tokens": self.llm_prompt_tokens,
             "llm_completion_tokens": self.llm_completion_tokens,
             "llm_calls": self.llm_calls,
+            "llm_retries": self.llm_retries,
         }
 
 
@@ -693,10 +697,12 @@ class Runner:
             report.llm_prompt_tokens = int(usage.get("prompt_tokens") or 0)
             report.llm_completion_tokens = int(usage.get("completion_tokens") or 0)
             report.llm_calls = int(usage.get("calls") or 0)
+            report.llm_retries = int(usage.get("retries") or 0)
             usage_fields = {
                 "llm_prompt_tokens": report.llm_prompt_tokens,
                 "llm_completion_tokens": report.llm_completion_tokens,
                 "llm_calls": report.llm_calls,
+                "llm_retries": report.llm_retries,
             }
         # v1.5: the stop event also carries the driver's final URL —
         # the freshest position in the trail, and what resume reads.

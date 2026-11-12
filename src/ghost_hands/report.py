@@ -262,6 +262,7 @@ def summarize(events: list[dict[str, Any]]) -> dict[str, Any]:
                 "llm_prompt_tokens",
                 "llm_completion_tokens",
                 "llm_calls",
+                "llm_retries",
             ):
                 value = ev.get(field_name)
                 if isinstance(value, int) and value >= 0:

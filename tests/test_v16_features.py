@@ -57,7 +57,12 @@ def test_anthropic_decide_shape_and_usage(monkeypatch):
     d = AnthropicDecider(base_url="http://a.local", api_key="sk-test")
     action = d.decide("g", _map(), [])
     assert action.kind == "extract"
-    assert d.usage == {"prompt_tokens": 210, "completion_tokens": 9, "calls": 1}
+    assert d.usage == {
+        "prompt_tokens": 210,
+        "completion_tokens": 9,
+        "calls": 1,
+        "retries": 0,
+    }
     req = state["requests"][0]
     assert req.full_url == "http://a.local/v1/messages"
     assert req.headers["X-api-key"] == "sk-test"

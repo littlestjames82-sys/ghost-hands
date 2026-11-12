@@ -3198,6 +3198,45 @@ def case_v17_doctor_deciders():
     assert row2.status != PASS
 
 
+def case_v18_retry_survives_flaky_endpoint():
+    os.environ["GHOST_HANDS_RETRY_BACKOFF"] = "0"
+    try:
+        class FlakyHandler(_StubLLMHandler):
+            queue = []
+            seen = []
+            fails = {"n": 0}
+
+            def do_POST(self):  # noqa: N802 - stdlib handler API
+                if type(self).fails["n"] < 2:
+                    type(self).fails["n"] += 1
+                    self.send_response(500)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+                super().do_POST()
+
+        FlakyHandler.queue = [
+            {"kind": "type", "target": 1, "text": "ghost"},
+            {"kind": "click", "target": 2},
+            {"kind": "done", "summary": "survived the flaky endpoint"},
+        ]
+        server = ThreadingHTTPServer(("127.0.0.1", 0), FlakyHandler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            base = f"http://127.0.0.1:{server.server_address[1]}/v1"
+            decider = OpenAICompatibleDecider(base_url=base, api_key="stub")
+            report = Runner(FakeDriver(DEMO_PAGES), decider, trail=Trail()).run(
+                "search the demo web"
+            )
+        finally:
+            server.shutdown()
+        assert report.stop_reason == "done", report.summary
+        assert report.llm_retries == 2, report.llm_retries
+        assert report.llm_calls == 3
+    finally:
+        os.environ.pop("GHOST_HANDS_RETRY_BACKOFF", None)
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -3330,6 +3369,7 @@ CASES = [
     ("v16 batch: a runbook of scripts with an honest roll-up", case_v16_batch_runbook),
     ("v17 resume chain: the child trail records its parent's last hash", case_v17_chain_linked_resume),
     ("v17 doctor: the deciders row names what's configured", case_v17_doctor_deciders),
+    ("v18 retry: a flaky endpoint's 500s are survived and counted", case_v18_retry_survives_flaky_endpoint),
 ]
 
 

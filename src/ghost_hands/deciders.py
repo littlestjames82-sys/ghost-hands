@@ -15,6 +15,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 from typing import Optional, Protocol
 
@@ -213,6 +215,64 @@ _SYSTEM_PROMPT = (
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
+_RETRYABLE_HTTP = (429, 500, 502, 503, 504)
+
+
+def _retry_limit() -> int:
+    raw = (os.environ.get("GHOST_HANDS_RETRIES") or "").strip()
+    try:
+        return max(0, min(5, int(raw))) if raw else 2
+    except ValueError:
+        return 2
+
+
+def _retry_backoff() -> float:
+    raw = (os.environ.get("GHOST_HANDS_RETRY_BACKOFF") or "").strip()
+    try:
+        return max(0.0, float(raw)) if raw else 0.5
+    except ValueError:
+        return 0.5
+
+
+def _post_json(make_request, timeout: float, usage: dict) -> dict:
+    """v1.8: POST JSON with bounded retry. Transient failures
+    (429/5xx, network errors) are retried up to GHOST_HANDS_RETRIES
+    times (default 2) with linear backoff; every retry is counted
+    in usage["retries"] so the run's accounting shows what the
+    network really cost. Non-retryable HTTP errors and oversized
+    responses fail immediately, as before."""
+    retries = _retry_limit()
+    backoff = _retry_backoff()
+    attempt = 0
+    while True:
+        req = make_request()
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise HandsError(
+                        "decider response too large "
+                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
+                    )
+                return json.loads(raw.decode("utf-8"))
+        except HandsError:
+            raise
+        except urllib.error.HTTPError as exc:
+            if exc.code in _RETRYABLE_HTTP and attempt < retries:
+                attempt += 1
+                usage["retries"] = int(usage.get("retries") or 0) + 1
+                time.sleep(backoff * attempt)
+                continue
+            raise HandsError(f"decider request failed: {exc}") from exc
+        except Exception as exc:  # network failure: fail honestly, after retries
+            if attempt < retries:
+                attempt += 1
+                usage["retries"] = int(usage.get("retries") or 0) + 1
+                time.sleep(backoff * attempt)
+                continue
+            raise HandsError(f"decider request failed: {exc}") from exc
+
+
 class OpenAICompatibleDecider:
     """One LLM decision pass per step, against any OpenAI-compatible
     endpoint. Reads GHOST_HANDS_BASE_URL / GHOST_HANDS_API_KEY /
@@ -242,9 +302,22 @@ class OpenAICompatibleDecider:
                 "yes",
             )
         self.batch = batch
+        # v1.8: JSON mode asks the endpoint for a strict JSON object
+        # reply (response_format) — fewer parse failures on
+        # providers that support it. Opt-in: some providers 400 on
+        # the parameter, so it stays off unless asked for.
+        self.json_mode = (
+            os.environ.get("GHOST_HANDS_JSON_MODE") or ""
+        ).strip().lower() in ("1", "true", "yes", "on")
         # v1.2: real token accounting, accumulated from API responses
         # that carry a usage object (ignored silently when absent).
-        self.usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        # v1.8: plus a retries counter (see _post_json).
+        self.usage: dict = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "calls": 0,
+            "retries": 0,
+        }
         if not self.base_url:
             raise HandsError(
                 "GHOST_HANDS_BASE_URL is not set; the OpenAI-compatible decider "
@@ -294,31 +367,22 @@ class OpenAICompatibleDecider:
             ],
             "temperature": 0,
         }
-        req = urllib.request.Request(
-            f"{self.base_url}/chat/completions",
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.api_key}",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                # v0.9.1: a model endpoint's reply is one small JSON
-                # object. Cap the read — an unbounded one lets a
-                # hostile/compromised endpoint exhaust memory.
-                raw = resp.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise HandsError(
-                        "decider response too large "
-                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
-                    )
-                payload = json.loads(raw.decode("utf-8"))
-        except HandsError:
-            raise
-        except Exception as exc:  # network or HTTP failure: fail honestly
-            raise HandsError(f"decider request failed: {exc}") from exc
+        if self.json_mode:
+            body["response_format"] = {"type": "json_object"}
+        data = json.dumps(body).encode("utf-8")
+
+        def make_request():
+            return urllib.request.Request(
+                f"{self.base_url}/chat/completions",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}",
+                },
+                method="POST",
+            )
+
+        payload = _post_json(make_request, self.timeout, self.usage)
         usage = payload.get("usage") or {}
         self.usage["calls"] += 1
         for key in ("prompt_tokens", "completion_tokens"):
@@ -419,7 +483,12 @@ class AnthropicDecider:
         if batch is None:
             batch = _batch_from_env()
         self.batch = batch
-        self.usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        self.usage: dict = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "calls": 0,
+            "retries": 0,
+        }
         if not self.api_key:
             raise HandsError(
                 "GHOST_HANDS_ANTHROPIC_API_KEY is not set; the Anthropic "
@@ -449,29 +518,21 @@ class AnthropicDecider:
                 }
             ],
         }
-        req = urllib.request.Request(
-            f"{self.base_url}/v1/messages",
-            data=json.dumps(body).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": self.api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read(MAX_RESPONSE_BYTES + 1)
-                if len(raw) > MAX_RESPONSE_BYTES:
-                    raise HandsError(
-                        "decider response too large "
-                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
-                    )
-                payload = json.loads(raw.decode("utf-8"))
-        except HandsError:
-            raise
-        except Exception as exc:
-            raise HandsError(f"decider request failed: {exc}") from exc
+        data = json.dumps(body).encode("utf-8")
+
+        def make_request():
+            return urllib.request.Request(
+                f"{self.base_url}/v1/messages",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+
+        payload = _post_json(make_request, self.timeout, self.usage)
         usage = payload.get("usage") or {}
         self.usage["calls"] += 1
         for ours, theirs in (
@@ -514,7 +575,12 @@ class FallbackDecider:
 
     @property
     def usage(self) -> dict:
-        total = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        total = {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "calls": 0,
+            "retries": 0,
+        }
         for side in (self.primary, self.fallback):
             side_usage = getattr(side, "usage", None)
             if isinstance(side_usage, dict):

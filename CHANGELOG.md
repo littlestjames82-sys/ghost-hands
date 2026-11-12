@@ -6,7 +6,24 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.7 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.8 in development (on GitHub main; release is Ryan's gate)
+
+The survive-the-network release (v1.8 wave):
+
+- **Bounded retry with backoff.** Both HTTP deciders (OpenAI-
+  compatible and Anthropic) now retry transient failures — 429,
+  5xx, network errors — up to `GHOST_HANDS_RETRIES` times
+  (default 2) with linear backoff (`GHOST_HANDS_RETRY_BACKOFF`).
+  Non-retryable errors still fail immediately. Retries are
+  counted in the decider's usage and land on the run report and
+  the trail's stop event as `llm_retries`: what the network cost
+  is part of the accounting, like tokens.
+- **JSON mode (opt-in).** `GHOST_HANDS_JSON_MODE=1` makes the
+  OpenAI-compatible decider request a strict JSON object reply
+  (`response_format`), cutting parse failures on providers that
+  support it. Off by default; some providers reject the parameter.
+- **`batch --max-llm-tokens`** applies the per-run token budget
+  cap to every script in a runbook.
 
 The proof-connected release (v1.7 wave):
 
