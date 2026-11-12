@@ -6,7 +6,27 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 + v1.3 + v1.4 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.5 in development (on GitHub main; release is Ryan's gate)
+
+The prove-it-first release (v1.5 wave):
+
+- **Verify can prove a negative.** The `verify` action gains
+  `absent_text`: assert that text does NOT appear on the page —
+  the error message is gone, the spinner disappeared — not only
+  that the success signal showed up.
+- **`ghost-hands check`.** Preflight a run script without
+  executing anything: every step is validated, classified, and
+  evaluated under the chosen policy (asks and denies named before
+  they can surprise a live run), and every `{{secret:NAME}}`
+  placeholder is confirmed present in the environment — names
+  only, values never read. Exit 1 on a deny, an invalid step, or
+  a missing secret.
+- **Resume from a dead run's trail.** `run --resume <trail>`
+  starts the new run where the old one stopped (the trail's stop
+  event now records the driver's final URL, and the first perceive
+  records the goal) and seeds the decider with a note covering
+  what the previous run did and how it ended. The old trail stays
+  untouched as that attempt's record.
 
 The orientation-and-resilience release (v1.4 wave):
 

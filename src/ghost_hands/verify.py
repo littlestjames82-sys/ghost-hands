@@ -8,7 +8,9 @@ can place before ``done``:
 - ``target`` — an element with that number exists on the current page;
 - ``text`` — the text appears in the page (title, element names, or the
   rendered body text), case-insensitively, whitespace-normalized;
-- ``url`` — the current URL contains the given substring.
+- ``url`` — the current URL contains the given substring;
+- ``absent_text`` (v1.5) — the text does NOT appear in the page:
+  prove the error is gone, not just that the success showed up.
 
 Every condition that is set must hold. Verification is evaluated by the
 Runner (and the MCP session) against the live perception — drivers
@@ -68,6 +70,14 @@ def evaluate_verify(
         else:
             failures.append(f"text {action.text!r} not found on the page")
 
+    if action.absent_text:
+        if _normalize(action.absent_text) not in _page_text(driver, element_map):
+            checks.append(f"text {action.absent_text!r} absent")
+        else:
+            failures.append(
+                f"text {action.absent_text!r} is still on the page"
+            )
+
     if action.url:
         try:
             current = driver.current_url() or ""
@@ -84,7 +94,7 @@ def evaluate_verify(
     if not checks and not failures:
         return False, (
             "verification failed: a verify action needs at least one "
-            "condition (target, text, or url)"
+            "condition (target, text, url, or absent_text)"
         )
     if failures:
         return False, "verification failed: " + "; ".join(failures)

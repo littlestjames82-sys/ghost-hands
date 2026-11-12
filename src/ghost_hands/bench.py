@@ -2972,6 +2972,93 @@ def case_v14_costs_aggregation(tmp_root=None):
     assert "1 run(s) reported no usage" in out, out
 
 
+def case_v15_verify_absent_text():
+    steps = [
+        {"kind": "verify", "absent_text": "No such error anywhere"},
+        {"kind": "done", "summary": "clean"},
+    ]
+    _, _, report = _run(DEMO_PAGES, steps, goal="bench absent pass")
+    assert report.stop_reason == "done", report.summary
+    steps2 = [{"kind": "verify", "absent_text": "Ghost Demo"}]
+    _, _, report2 = _run(DEMO_PAGES, steps2, goal="bench absent fail")
+    assert report2.stop_reason == "error", report2.summary
+    assert "still on the page" in report2.summary
+
+
+def case_v15_check_preflight():
+    import tempfile
+
+    from .cli import main as cli_main
+
+    try:
+        root = tempfile.mkdtemp(prefix="gh-check-")
+    except OSError as exc:
+        return (SKIP, f"tempdir unavailable: {exc}")
+    import io
+    from contextlib import redirect_stdout
+
+    good = os.path.join(root, "good.json")
+    with open(good, "w", encoding="utf-8") as fh:
+        json.dump(
+            {
+                "steps": [
+                    {"kind": "type", "target": 1, "text": "ghost"},
+                    {"kind": "verify", "absent_text": "Error"},
+                    {"kind": "done", "summary": "x"},
+                ]
+            },
+            fh,
+        )
+    bad = os.path.join(root, "bad.json")
+    with open(bad, "w", encoding="utf-8") as fh:
+        json.dump([{"kind": "teleport"}], fh)
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc_good = cli_main(["check", good])
+        rc_bad = cli_main(["check", bad])
+    assert rc_good == 0, buf.getvalue()
+    assert rc_bad == 1, buf.getvalue()
+
+
+def case_v15_resume_from_trail():
+    import tempfile
+
+    from .resume import load_resume_context, resume_note
+
+    try:
+        root = tempfile.mkdtemp(prefix="gh-resume-")
+    except OSError as exc:
+        return (SKIP, f"tempdir unavailable: {exc}")
+    trail = Trail()
+    first = Runner(
+        FakeDriver(DEMO_PAGES),
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "ghost"},
+                {"kind": "click", "target": 2},
+                {"kind": "extract"},
+            ]
+        ),
+        trail=trail,
+        step_budget=2,
+    ).run("search the demo web")
+    assert first.stop_reason == "budget", first.summary
+    path = os.path.join(root, "dead.jsonl")
+    with open(path, "w", encoding="utf-8") as fh:
+        for ev in trail.events:
+            fh.write(json.dumps(ev) + "\n")
+    ctx = load_resume_context(path)
+    assert ctx["start_url"] == "https://demo.local/results", ctx
+    assert ctx["executed_steps"] == 2, ctx
+    second = Runner(
+        FakeDriver(DEMO_PAGES, start_url=ctx["start_url"]),
+        ScriptedDecider([{"kind": "done", "summary": "finished"}]),
+        trail=Trail(),
+        initial_history=[{"kind": "system", "note": resume_note(ctx)}],
+    ).run(ctx["goal"])
+    assert second.stop_reason == "done", second.summary
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -3097,6 +3184,9 @@ CASES = [
     ("v14 change notes: the decider is told what changed on the page", case_v14_change_note_reaches_decider),
     ("v14 fallback: a dead primary endpoint fails over mid-run", case_v14_fallback_decider_failover),
     ("v14 costs: token spend aggregates across trail files", case_v14_costs_aggregation),
+    ("v15 verify absent: prove the error text is gone", case_v15_verify_absent_text),
+    ("v15 check: preflight classifies a script without running it", case_v15_check_preflight),
+    ("v15 resume: a dead run's trail seeds its continuation", case_v15_resume_from_trail),
 ]
 
 

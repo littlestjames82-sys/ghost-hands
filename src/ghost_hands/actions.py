@@ -66,6 +66,8 @@ _FIELDS = (
     "y",
     "width",
     "height",
+    # v1.5
+    "absent_text",
 )
 
 
@@ -93,6 +95,9 @@ class Action:
     y: Optional[float] = None
     width: Optional[int] = None  # set_viewport custom size
     height: Optional[int] = None
+    # v1.5: verify-only — text that must NOT appear on the page
+    # (prove the error message is gone, not just that success showed).
+    absent_text: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.kind not in ACTION_KINDS:
@@ -134,6 +139,7 @@ class Action:
             self.y,
             json.dumps(self.fields, sort_keys=True) if self.fields else None,
             self.submit,
+            self.absent_text,
         )
 
 
@@ -203,19 +209,22 @@ def verify(
     text: Optional[str] = None,
     target: Optional[int] = None,
     url_contains: Optional[str] = None,
+    absent_text: Optional[str] = None,
 ) -> Action:
     """Assert the current state before claiming success (v1.0).
 
     Every condition set must hold: ``text`` appears on the page,
     ``target`` is an element number that exists, ``url_contains`` is a
-    substring of the current URL. Readonly; evaluated by the Runner
-    against the live perception, never sent to a driver. A failed
-    verification stops the run with an honest error."""
+    substring of the current URL, and ``absent_text`` (v1.5) does NOT
+    appear on the page. Readonly; evaluated by the Runner against the
+    live perception, never sent to a driver. A failed verification
+    stops the run with an honest error."""
     return Action(
         kind="verify",
         text=text,
         target=int(target) if target is not None else None,
         url=url_contains,
+        absent_text=absent_text,
     )
 
 

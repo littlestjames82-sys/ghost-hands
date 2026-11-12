@@ -104,6 +104,7 @@ class Runner:
         require_verify: bool = False,
         recovery_attempts: int = 1,
         max_llm_tokens: Optional[int] = None,
+        initial_history: Optional[list[dict]] = None,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -128,6 +129,8 @@ class Runner:
         # run never dies mid-action over budget.
         self.recovery_attempts = recovery_attempts
         self.max_llm_tokens = max_llm_tokens
+        # v1.5: seed history for a resumed run (see ghost_hands.resume).
+        self.initial_history = initial_history
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -163,7 +166,9 @@ class Runner:
             stop_reason="budget",
             trail_path=str(self.trail.path) if self.trail.path else None,
         )
-        history: list[dict] = []
+        history: list[dict] = [
+            dict(h) for h in (self.initial_history or [])
+        ]
         seen_actions: dict[tuple, int] = {}
         last_signature: Optional[str] = None
         prev_map = None  # v1.4: last step's map, for change notes
@@ -233,6 +238,8 @@ class Runner:
             except Exception as exc:
                 return self._stop(report, step, "error", f"perceive failed: {exc}")
             rendered = element_map.render()
+            # v1.5: the first perceive also records the run's goal —
+            # resume and the costs/report tooling read it from there.
             self.trail.record(
                 "perceive",
                 step,
@@ -241,6 +248,7 @@ class Runner:
                 elements=len(element_map),
                 map_chars=len(rendered),
                 signature=element_map.signature(),
+                **({"goal": goal} if step == 1 and goal else {}),
             )
 
             # stuck: map unchanged across consecutive steps
@@ -680,7 +688,16 @@ class Runner:
                 "llm_completion_tokens": report.llm_completion_tokens,
                 "llm_calls": report.llm_calls,
             }
-        self.trail.record("stop", step, reason=reason, summary=summary, **usage_fields)
+        # v1.5: the stop event also carries the driver's final URL —
+        # the freshest position in the trail, and what resume reads.
+        try:
+            stop_url = self.driver.current_url() or ""
+        except Exception:
+            stop_url = ""
+        self.trail.record(
+            "stop", step, reason=reason, summary=summary, url=stop_url,
+            **usage_fields,
+        )
         acct = self.trail.accounting()
         report.map_chars = acct["map_chars"]
         report.est_tokens = acct["est_tokens"]

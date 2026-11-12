@@ -78,6 +78,24 @@ def cmd_run(args) -> int:
     else:
         steps, pages, start = raw, None, None
 
+    # v1.5: --resume <trail> seeds this run from a dead run's trail:
+    # start where it stopped (unless the script names its own start)
+    # and tell the decider what already happened.
+    initial_history = None
+    if getattr(args, "resume", None):
+        from .resume import load_resume_context, resume_note
+
+        try:
+            resume_ctx = load_resume_context(args.resume)
+        except (OSError, ValueError) as exc:
+            print(f"error: cannot read resume trail: {exc}", file=sys.stderr)
+            return 2
+        initial_history = [
+            {"kind": "system", "note": resume_note(resume_ctx)}
+        ]
+        if not start and resume_ctx.get("start_url"):
+            start = resume_ctx["start_url"]
+
     policy = Policy()
     if args.policy and getattr(args, "policy_pack", None):
         print(
@@ -159,6 +177,7 @@ def cmd_run(args) -> int:
         require_verify=bool(getattr(args, "require_verify", False)),
         max_llm_tokens=getattr(args, "max_llm_tokens", None),
         recovery_attempts=int(getattr(args, "recovery_attempts", 1)),
+        initial_history=initial_history,
     )
     try:
         report = runner.run(args.goal or "")
@@ -202,6 +221,90 @@ def cmd_verify_trail(args) -> int:
     if verdict["ok"]:
         return 0
     return 2 if verdict["hashed"] == 0 else 1
+
+
+def cmd_check(args) -> int:
+    """v1.5: preflight a run script against the Governor — without
+    executing anything. Every step is validated, classified, and
+    evaluated under the chosen policy; secret placeholders are
+    checked for presence in the environment (names only, values
+    never read or printed). Exit 1 when any step would be denied,
+    is invalid, or names a missing secret; asks are reported, not
+    failures — they are the approval prompts a real run would raise."""
+    from .actions import Action
+    from .governor import Governor, Policy
+    from .policies import load_pack
+    from .secrets import _env_key, action_secret_refs
+
+    try:
+        raw = json.loads(Path(args.script).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        print(f"error: cannot read script: {exc}", file=sys.stderr)
+        return 2
+    if isinstance(raw, dict):
+        steps = raw.get("steps")
+        start = raw.get("start") or ""
+    else:
+        steps, start = raw, ""
+    if not isinstance(steps, list) or not all(
+        isinstance(s, dict) for s in steps
+    ):
+        print(
+            "error: script must be a list of action objects or an "
+            "object with a 'steps' list",
+            file=sys.stderr,
+        )
+        return 2
+    policy = Policy()
+    if getattr(args, "policy_pack", None):
+        try:
+            policy = load_pack(args.policy_pack).policy
+        except HandsError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    elif getattr(args, "policy", None):
+        try:
+            policy = Policy.from_dict(
+                json.loads(Path(args.policy).read_text(encoding="utf-8"))
+            )
+        except (OSError, ValueError) as exc:
+            print(f"error: cannot read policy: {exc}", file=sys.stderr)
+            return 2
+    governor = Governor(policy)
+    counts = {"allow": 0, "ask": 0, "deny": 0, "invalid": 0}
+    missing_secrets: list[str] = []
+    for i, step in enumerate(steps, start=1):
+        try:
+            action = Action.from_dict(step)
+        except (ValueError, TypeError) as exc:
+            counts["invalid"] += 1
+            print(f"step {i}: INVALID — {exc}")
+            continue
+        decision = governor.evaluate(action, None, start)
+        counts[decision.outcome] = counts.get(decision.outcome, 0) + 1
+        notes = []
+        if decision.outcome != "allow":
+            notes.append(decision.reason)
+        for ref in action_secret_refs(action):
+            if os.environ.get(_env_key(ref)):
+                notes.append(f"secret {ref}: set")
+            else:
+                notes.append(f"secret {ref}: MISSING ({_env_key(ref)} not set)")
+                missing_secrets.append(ref)
+        suffix = (" — " + "; ".join(notes)) if notes else ""
+        print(
+            f"step {i}: {action.kind} [{decision.classification}] "
+            f"-> {decision.outcome}{suffix}"
+        )
+    print(
+        f"check: {len(steps)} step(s): {counts['allow']} allow, "
+        f"{counts['ask']} ask, {counts['deny']} deny, "
+        f"{counts['invalid']} invalid; "
+        f"{len(missing_secrets)} missing secret(s)"
+    )
+    if counts["deny"] or counts["invalid"] or missing_secrets:
+        return 1
+    return 0
 
 
 def cmd_costs(args) -> int:
@@ -530,6 +633,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="also run the live-network cases (example.com, Wikipedia)",
     )
 
+    p_check = sub.add_parser(
+        "check",
+        help="preflight a run script against the Governor (v1.5): "
+        "classify every step, flag asks/denies, and confirm secret "
+        "placeholders resolve — without executing anything",
+    )
+    p_check.add_argument("script", help="JSON steps file (same format as run --script)")
+    p_check.add_argument("--policy", help="JSON policy file")
+    p_check.add_argument(
+        "--policy-pack",
+        help="named policy pack (same packs as run --policy-pack)",
+    )
+
     p_run = sub.add_parser("run", help="run scripted steps from a JSON file")
     p_run.add_argument("--script", required=True, help="JSON steps file")
     p_run.add_argument(
@@ -578,6 +694,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reject a script's 'done' until a verify step has passed "
         "in the same run (v1.2): success must be proven, not claimed",
+    )
+    p_run.add_argument(
+        "--resume",
+        metavar="TRAIL",
+        help="resume from a dead run's trail (v1.5): start where it "
+        "stopped and seed the decider with what already happened",
     )
     p_run.add_argument(
         "--max-llm-tokens",
@@ -813,6 +935,7 @@ def main(argv=None) -> int:
         "demo": cmd_demo,
         "bench": cmd_bench,
         "run": cmd_run,
+        "check": cmd_check,
         "export": cmd_export,
         "verify-trail": cmd_verify_trail,
         "costs": cmd_costs,
