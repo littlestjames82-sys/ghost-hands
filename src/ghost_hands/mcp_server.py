@@ -39,6 +39,8 @@ switching bodies or approvers means starting a new server process:
   ``goal`` with no ``steps`` — the server's own OpenAI-compatible
   decider (configured by ``GHOST_HANDS_BASE_URL`` / ``GHOST_HANDS_MODEL``
   / ``GHOST_HANDS_API_KEY``) drives the run under the same Governor.
+  ``GHOST_HANDS_DECIDER=anthropic`` (v1.6) selects the native
+  Anthropic decider instead (``GHOST_HANDS_ANTHROPIC_*`` env).
   ``GHOST_HANDS_FALLBACK_BASE_URL`` (v1.4, with optional
   ``GHOST_HANDS_FALLBACK_API_KEY`` / ``GHOST_HANDS_FALLBACK_MODEL``)
   adds a second endpoint that answers when the primary fails.
@@ -481,12 +483,14 @@ def _run(session: HandsSession, args: dict) -> dict:
             "HTML strings.",
             is_error=True,
         )
-    # v1.3: goal-driven mode — with GHOST_HANDS_DECIDER=openai the
-    # server's own LLM decider drives from 'goal' and 'steps' is
-    # omitted. Scripted mode (the default) still requires steps.
-    llm_mode = (
-        (os.environ.get("GHOST_HANDS_DECIDER") or "").strip().lower() == "openai"
+    # v1.3: goal-driven mode — with GHOST_HANDS_DECIDER=openai (or
+    # anthropic, v1.6) the server's own LLM decider drives from
+    # 'goal' and 'steps' is omitted. Scripted mode (the default)
+    # still requires steps.
+    decider_kind = (
+        (os.environ.get("GHOST_HANDS_DECIDER") or "").strip().lower()
     )
+    llm_mode = decider_kind in ("openai", "anthropic")
     steps = args.get("steps")
     if steps is None and llm_mode:
         steps = []
@@ -495,14 +499,15 @@ def _run(session: HandsSession, args: dict) -> dict:
     ):
         return _text(
             "ERROR: 'steps' must be an array of action objects "
-            "(omit it only in goal-driven mode, GHOST_HANDS_DECIDER=openai).",
+            "(omit it only in goal-driven mode, GHOST_HANDS_DECIDER=openai "
+            "or anthropic).",
             is_error=True,
         )
     if steps and llm_mode:
         return _text(
             "ERROR: this server runs goal-driven (GHOST_HANDS_DECIDER="
-            "openai); pass 'goal' without 'steps', or unset the env var "
-            "for scripted runs.",
+            f"{decider_kind}); pass 'goal' without 'steps', or unset the "
+            "env var for scripted runs.",
             is_error=True,
         )
     if llm_mode and not str(args.get("goal") or "").strip():
@@ -521,10 +526,18 @@ def _run(session: HandsSession, args: dict) -> dict:
     trail = Trail()
     approver = None
     if llm_mode:
-        from .deciders import FallbackDecider, OpenAICompatibleDecider
+        from .deciders import (
+            AnthropicDecider,
+            FallbackDecider,
+            OpenAICompatibleDecider,
+        )
 
         try:
-            decider = OpenAICompatibleDecider()
+            decider = (
+                AnthropicDecider()
+                if decider_kind == "anthropic"
+                else OpenAICompatibleDecider()
+            )
             fallback_url = (
                 os.environ.get("GHOST_HANDS_FALLBACK_BASE_URL") or ""
             ).strip()

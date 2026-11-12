@@ -29,6 +29,7 @@ from pathlib import Path
 from . import actions as A
 from .actions import Action
 from .deciders import (
+    AnthropicDecider,
     FallbackDecider,
     OpenAICompatibleDecider,
     RuleDecider,
@@ -3059,6 +3060,99 @@ def case_v15_resume_from_trail():
     assert second.stop_reason == "done", second.summary
 
 
+def case_v16_anthropic_decider_wire():
+    class AnthropicHandler(BaseHTTPRequestHandler):
+        queue = [
+            {"kind": "type", "target": 1, "text": "ghost"},
+            {"kind": "click", "target": 2},
+            {"kind": "done", "summary": "claude finished"},
+        ]
+        seen = []
+
+        def do_POST(self):  # noqa: N802 - stdlib handler API
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length) if length else b"{}"
+            type(self).seen.append(
+                {"auth": self.headers.get("x-api-key"), "path": self.path}
+            )
+            item = (
+                type(self).queue.pop(0)
+                if type(self).queue
+                else {"kind": "done", "summary": "queue empty"}
+            )
+            payload = {
+                "content": [{"type": "text", "text": json.dumps(item)}],
+                "usage": {"input_tokens": 40, "output_tokens": 3},
+            }
+            data = json.dumps(payload).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), AnthropicHandler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{server.server_address[1]}"
+    try:
+        decider = AnthropicDecider(base_url=base, api_key="stub-key")
+        report = Runner(FakeDriver(DEMO_PAGES), decider, trail=Trail()).run(
+            "search the demo web"
+        )
+        assert report.stop_reason == "done", report.summary
+        assert report.llm_calls == 3
+        assert report.llm_prompt_tokens == 120
+        assert AnthropicHandler.seen[0]["path"] == "/v1/messages"
+        assert AnthropicHandler.seen[0]["auth"] == "stub-key"
+    finally:
+        server.shutdown()
+
+
+def case_v16_batch_runbook():
+    import tempfile
+
+    from .cli import main as cli_main
+
+    try:
+        root = tempfile.mkdtemp(prefix="gh-batch-")
+    except OSError as exc:
+        return (SKIP, f"tempdir unavailable: {exc}")
+    import io
+    from contextlib import redirect_stdout
+
+    def write(name, payload):
+        path = os.path.join(root, name)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh)
+        return path
+
+    good = write(
+        "good.json",
+        {
+            "goal": "search it",
+            "steps": [
+                {"kind": "type", "target": 1, "text": "ghost"},
+                {"kind": "click", "target": 2},
+                {"kind": "done", "summary": "found"},
+            ],
+        },
+    )
+    bad = write(
+        "bad.json",
+        {"steps": [{"kind": "verify", "text": "definitely not on the page"}]},
+    )
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        rc = cli_main(["batch", good, bad])
+        rc_good = cli_main(["batch", good])
+    out = buf.getvalue()
+    assert rc == 1 and rc_good == 0, out
+    assert "BATCH: 1/2 done" in out, out
+
+
 def case_v12_require_verify_gate():
     steps = [
         {"kind": "done", "summary": "trust me"},
@@ -3187,6 +3281,8 @@ CASES = [
     ("v15 verify absent: prove the error text is gone", case_v15_verify_absent_text),
     ("v15 check: preflight classifies a script without running it", case_v15_check_preflight),
     ("v15 resume: a dead run's trail seeds its continuation", case_v15_resume_from_trail),
+    ("v16 anthropic: the native Claude decider drives a run, usage mapped", case_v16_anthropic_decider_wire),
+    ("v16 batch: a runbook of scripts with an honest roll-up", case_v16_batch_runbook),
 ]
 
 

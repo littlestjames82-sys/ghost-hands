@@ -6,7 +6,24 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.5 in development (on GitHub main; release is Ryan's gate)
+## [Unreleased] — v1.2 through v1.6 in development (on GitHub main; release is Ryan's gate)
+
+The more-models, more-runs release (v1.6 wave):
+
+- **Native Anthropic decider.** `AnthropicDecider` speaks the
+  Messages API directly (no compatibility shim): same action
+  dialect, batch mode, focused perception, and usage accounting
+  (input/output tokens mapped onto the same report fields). Over
+  MCP, `GHOST_HANDS_DECIDER=anthropic` selects it for goal-driven
+  `hands_run`; it composes with the fallback decider like any
+  other, so a Claude primary can fail over to an OpenAI-compatible
+  endpoint or the reverse.
+- **`ghost-hands batch`.** Run several scripts as one runbook:
+  fresh body and trail per script, asks denied unless
+  `--approve-all` (a batch never prompts), one line per script
+  plus a roll-up with the total real LLM tokens. Exit 0 only when
+  every script ends `done`; a broken script is reported, not
+  fatal to the rest.
 
 The prove-it-first release (v1.5 wave):
 

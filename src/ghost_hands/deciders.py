@@ -329,19 +329,169 @@ class OpenAICompatibleDecider:
             content = payload["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise HandsError(f"unexpected decider response shape: {exc}") from exc
-        match = re.search(r"\{.*\}", content, flags=re.DOTALL)
-        if not match:
-            raise HandsError(f"decider did not return a JSON action: {content[:120]!r}")
+        return _parse_actions(content)
+
+
+def _parse_actions(content: str) -> list[Action]:
+    """Parse a model's reply into actions: one action object, or
+    {"actions": [...]} (capped at 5) in batch mode. Shared by the
+    OpenAI-compatible and Anthropic deciders so both speak exactly
+    the same action dialect."""
+    match = re.search(r"\{.*\}", content, flags=re.DOTALL)
+    if not match:
+        raise HandsError(f"decider did not return a JSON action: {content[:120]!r}")
+    try:
+        parsed = json.loads(match.group(0))
+        if isinstance(parsed, dict) and isinstance(parsed.get("actions"), list):
+            actions = [Action.from_dict(item) for item in parsed["actions"][:5]]
+            if not actions:
+                raise ValueError("empty actions list")
+            return actions
+        return [Action.from_dict(parsed)]
+    except (ValueError, TypeError) as exc:
+        raise HandsError(f"decider returned an invalid action: {exc}") from exc
+
+
+def _batch_from_env() -> bool:
+    return (os.environ.get("GHOST_HANDS_BATCH") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+def _user_prompt(goal: str, element_map: ElementMap, history: list[dict], want_batch: bool) -> str:
+    recent = history[-5:]
+    user = (
+        f"Goal: {goal}\n\nPage: {element_map.url}\n"
+        f"Elements:\n{element_map.render_focused(goal)}\n\n"
+        f"Recent actions: {json.dumps(recent)}\n\nNext action JSON:"
+    )
+    if want_batch:
+        user += (
+            ' You may instead return {"actions": [ ... ]} with up to'
+            " 5 actions when the next steps are obvious from this"
+            " page (for example filling several fields of one form)."
+            " Every action is still checked and approved on its own"
+            " before it runs, and the page is re-read between them,"
+            " so batch only steps you are confident about."
+        )
+    return user
+
+
+class AnthropicDecider:
+    """v1.6: one LLM decision pass per step against Anthropic's
+    Messages API — the Claude family, which tops most browser-agent
+    evaluations, as a first-class decider rather than through a
+    compatibility shim. Same action dialect, same batch mode, same
+    usage accounting as the OpenAI-compatible decider. Reads
+    GHOST_HANDS_ANTHROPIC_BASE_URL / GHOST_HANDS_ANTHROPIC_API_KEY /
+    GHOST_HANDS_ANTHROPIC_MODEL (or the ANTHROPIC_* spellings) from
+    the environment; the key is never stored or trailed."""
+
+    def __init__(
+        self,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        api_key: Optional[str] = None,
+        timeout: float = 30.0,
+        batch: Optional[bool] = None,
+    ) -> None:
+        self.base_url = (
+            base_url
+            or os.environ.get("GHOST_HANDS_ANTHROPIC_BASE_URL")
+            or os.environ.get("ANTHROPIC_BASE_URL")
+            or "https://api.anthropic.com"
+        ).rstrip("/")
+        self.api_key = (
+            api_key
+            or os.environ.get("GHOST_HANDS_ANTHROPIC_API_KEY")
+            or os.environ.get("ANTHROPIC_API_KEY")
+            or ""
+        )
+        self.model = (
+            model
+            or os.environ.get("GHOST_HANDS_ANTHROPIC_MODEL")
+            or os.environ.get("ANTHROPIC_MODEL")
+            or "claude-sonnet-4-5"
+        )
+        self.timeout = timeout
+        if batch is None:
+            batch = _batch_from_env()
+        self.batch = batch
+        self.usage: dict = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+        if not self.api_key:
+            raise HandsError(
+                "GHOST_HANDS_ANTHROPIC_API_KEY is not set; the Anthropic "
+                "decider needs a key in the environment (it is never stored)"
+            )
+
+    def decide(self, goal: str, element_map: ElementMap, history: list[dict]) -> Action:
+        return self._request_actions(goal, element_map, history, want_batch=False)[0]
+
+    def decide_batch(
+        self, goal: str, element_map: ElementMap, history: list[dict]
+    ) -> list[Action]:
+        return self._request_actions(goal, element_map, history, want_batch=True)
+
+    def _request_actions(
+        self, goal: str, element_map: ElementMap, history: list[dict], want_batch: bool
+    ) -> list[Action]:
+        body = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "temperature": 0,
+            "system": _SYSTEM_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": _user_prompt(goal, element_map, history, want_batch),
+                }
+            ],
+        }
+        req = urllib.request.Request(
+            f"{self.base_url}/v1/messages",
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "x-api-key": self.api_key,
+                "anthropic-version": "2023-06-01",
+            },
+            method="POST",
+        )
         try:
-            parsed = json.loads(match.group(0))
-            if isinstance(parsed, dict) and isinstance(parsed.get("actions"), list):
-                actions = [Action.from_dict(item) for item in parsed["actions"][:5]]
-                if not actions:
-                    raise ValueError("empty actions list")
-                return actions
-            return [Action.from_dict(parsed)]
-        except (ValueError, TypeError) as exc:
-            raise HandsError(f"decider returned an invalid action: {exc}") from exc
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+                raw = resp.read(MAX_RESPONSE_BYTES + 1)
+                if len(raw) > MAX_RESPONSE_BYTES:
+                    raise HandsError(
+                        "decider response too large "
+                        f"(> {MAX_RESPONSE_BYTES} bytes) — refused"
+                    )
+                payload = json.loads(raw.decode("utf-8"))
+        except HandsError:
+            raise
+        except Exception as exc:
+            raise HandsError(f"decider request failed: {exc}") from exc
+        usage = payload.get("usage") or {}
+        self.usage["calls"] += 1
+        for ours, theirs in (
+            ("prompt_tokens", "input_tokens"),
+            ("completion_tokens", "output_tokens"),
+        ):
+            value = usage.get(theirs)
+            if isinstance(value, int) and value >= 0:
+                self.usage[ours] += value
+        try:
+            content = "".join(
+                block.get("text", "")
+                for block in payload["content"]
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        except (KeyError, TypeError) as exc:
+            raise HandsError(f"unexpected decider response shape: {exc}") from exc
+        if not content:
+            raise HandsError("decider returned no text content")
+        return _parse_actions(content)
 
 
 class FallbackDecider:

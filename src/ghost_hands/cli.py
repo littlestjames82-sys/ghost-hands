@@ -223,6 +223,94 @@ def cmd_verify_trail(args) -> int:
     return 2 if verdict["hashed"] == 0 else 1
 
 
+def cmd_batch(args) -> int:
+    """v1.6: run several run scripts as one runbook. Each script
+    gets a fresh body and its own trail; asks are denied unless
+    --approve-all (a batch never prompts). Prints one line per
+    script plus a roll-up with total real LLM tokens; exit 0 only
+    when every script ends 'done'."""
+    from .drivers import DEMO_PAGES, ChromiumDriver, FakeDriver
+    from .governor import Policy
+    from .policies import load_pack
+
+    policy = Policy()
+    if getattr(args, "policy_pack", None):
+        try:
+            policy = load_pack(args.policy_pack).policy
+        except HandsError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 2
+    approver = (lambda action: True) if args.approve_all else None
+    trail_dir = Path(args.trail_dir) if getattr(args, "trail_dir", None) else None
+    if trail_dir:
+        trail_dir.mkdir(parents=True, exist_ok=True)
+    shared_driver = ChromiumDriver() if args.driver == "chromium" else None
+    results: list[dict] = []
+    try:
+        for script_path in args.scripts:
+            path = Path(script_path)
+            name = path.stem
+            try:
+                raw = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(raw, dict):
+                    steps = raw["steps"]
+                    pages = raw.get("pages")
+                    start = raw.get("start")
+                    goal = raw.get("goal") or name
+                else:
+                    steps, pages, start, goal = raw, None, None, name
+                actions = [Action.from_dict(s) for s in steps]
+            except (OSError, ValueError, KeyError, TypeError) as exc:
+                print(f"{name}: INVALID SCRIPT — {exc}")
+                results.append({"name": name, "stop_reason": "invalid"})
+                continue
+            if shared_driver is not None:
+                driver = shared_driver
+            else:
+                driver = FakeDriver(pages or DEMO_PAGES, start_url=start)
+            trail = Trail(trail_dir / f"{name}.jsonl") if trail_dir else Trail()
+            runner = Runner(
+                driver,
+                ScriptedDecider([a.to_dict() for a in actions]),
+                policy=policy,
+                approver=approver,
+                trail=trail,
+                start_url=start if shared_driver is not None else None,
+                require_verify=bool(getattr(args, "require_verify", False)),
+            )
+            try:
+                report = runner.run(str(goal))
+            finally:
+                if shared_driver is None:
+                    driver.close()
+            results.append(
+                {
+                    "name": name,
+                    "stop_reason": report.stop_reason,
+                    "summary": report.summary,
+                    "llm_calls": report.llm_calls,
+                    "llm_tokens": report.llm_prompt_tokens
+                    + report.llm_completion_tokens,
+                }
+            )
+            print(
+                f"{name}: {report.stop_reason} — {report.summary} "
+                f"({report.steps} steps)"
+            )
+    finally:
+        if shared_driver is not None:
+            shared_driver.close()
+    done = sum(1 for r in results if r["stop_reason"] == "done")
+    total_tokens = sum(r.get("llm_tokens", 0) for r in results)
+    total_calls = sum(r.get("llm_calls", 0) for r in results)
+    print(
+        f"BATCH: {done}/{len(results)} done; "
+        f"{total_tokens:,} LLM tokens across {total_calls} model calls "
+        "(scripted runs report 0 — they make none)"
+    )
+    return 0 if done == len(results) else 1
+
+
 def cmd_check(args) -> int:
     """v1.5: preflight a run script against the Governor — without
     executing anything. Every step is validated, classified, and
@@ -633,6 +721,37 @@ def build_parser() -> argparse.ArgumentParser:
         help="also run the live-network cases (example.com, Wikipedia)",
     )
 
+    p_batch = sub.add_parser(
+        "batch",
+        help="run several scripts as one runbook (v1.6): a line per "
+        "script plus a roll-up; asks are denied unless --approve-all",
+    )
+    p_batch.add_argument("scripts", nargs="+", help="JSON script files")
+    p_batch.add_argument(
+        "--driver",
+        choices=("fake", "chromium"),
+        default="fake",
+    )
+    p_batch.add_argument(
+        "--trail-dir",
+        help="write one trail JSONL per script into this directory",
+    )
+    p_batch.add_argument(
+        "--approve-all",
+        action="store_true",
+        help="approve every 'ask' verdict in every script (the whole "
+        "runbook is pre-authorized)",
+    )
+    p_batch.add_argument(
+        "--require-verify",
+        action="store_true",
+        help="apply the require-verify gate to every script",
+    )
+    p_batch.add_argument(
+        "--policy-pack",
+        help="named policy pack applied to every script",
+    )
+
     p_check = sub.add_parser(
         "check",
         help="preflight a run script against the Governor (v1.5): "
@@ -936,6 +1055,7 @@ def main(argv=None) -> int:
         "bench": cmd_bench,
         "run": cmd_run,
         "check": cmd_check,
+        "batch": cmd_batch,
         "export": cmd_export,
         "verify-trail": cmd_verify_trail,
         "costs": cmd_costs,

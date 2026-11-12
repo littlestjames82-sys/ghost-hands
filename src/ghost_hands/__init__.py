@@ -100,6 +100,7 @@ from .busagent import BusAgent
 from .busclient import BusClient, BusError
 from .cache import PlanCache, plan_key
 from .deciders import (
+    AnthropicDecider,
     FallbackDecider,
     OpenAICompatibleDecider,
     RuleDecider,
@@ -137,6 +138,7 @@ __all__ = [
     "Governor",
     "HandsError",
     "ObservingDecider",
+    "AnthropicDecider",
     "FallbackDecider",
     "OpenAICompatibleDecider",
     "PhoneApprover",
