@@ -30,18 +30,15 @@ MIT licensed.
 
 MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 
-> Status: v1.1.0 — live on PyPI and GitHub:
+> Status: v1.11.0 — live on PyPI and GitHub:
 > [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
 > (`pip install ghost-hands`) ·
 > [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
 > [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
 >
-> v1.1.0 adds focused perception, trail-integrity surfacing in the
-> report and the MCP trail tool, the plan cache over MCP, and bench
-> proof cases for the v1.0 features — see the CHANGELOG.
->
-> On GitHub `main`, the v1.2 through v1.11 waves are in
-> development: batched model calls with per-action governance,
+> v1.11.0 gathers the ten waves built on GitHub `main` since
+> v1.1.0 (v1.2 through v1.11) into one release: batched model
+> calls with per-action governance,
 > real API-reported token accounting, the require-verify gate, a
 > fifth MCP tool (`hands_verify_trail`), governed recovery from
 > stuck, an LLM token budget cap, goal-driven `hands_run` over
@@ -64,8 +61,7 @@ MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 > that fixed two graded-suite defects a real-model run
 > exposed (the form checker now credits `fill_form`, and
 > the login task teaches the secret-placeholder flow it
-> audits). Their release is a
-> separate gate.
+> audits). See the CHANGELOG for the wave-by-wave record.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release

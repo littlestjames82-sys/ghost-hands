@@ -92,7 +92,7 @@ cache over MCP (``hands_run`` honors ``GHOST_HANDS_CACHE``), and
 bench proof cases for the v1.0 features.
 """
 
-__version__ = "1.1.0"
+__version__ = "1.11.0"
 
 from .actions import Action
 from .android_driver import AndroidDriver

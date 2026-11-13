@@ -6,7 +6,25 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
-## [Unreleased] — v1.2 through v1.10 in development (on GitHub main; release is Ryan's gate)
+## [1.11.0] — November 12, 2026
+
+The honest-ruler release (v1.11 wave):
+
+- **Eval integrity.** Two graded-suite defects found by
+  running a real model (Muse Spark 1.3) and fixed. The
+  form-fill checker now credits values entered through
+  the `fill_form` action, not only individual `type`
+  actions (a correct fill_form run had scored zero). And
+  `login-trail-audit` was unpassable by construction:
+  its goal printed the fixture password, and the trail
+  records the goal, so the leak audit flagged every
+  run, including the suite's own stub. The task now
+  teaches the shipped secret-placeholder flow: the
+  password is typed as `{{secret:PASSWORD}}`, the eval
+  provisions the fixture secret itself, and the checker
+  requires the real password to appear nowhere in the
+  trail at all.
+
 
 The never-give-up release (v1.10 wave):
 
