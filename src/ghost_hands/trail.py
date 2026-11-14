@@ -65,6 +65,12 @@ EVENT_TYPES = (
     # attempt, items (per-item satisfied/evidence/judge_satisfied/
     # note), objections.
     "validation",
+    # v1.16: one per-action postcondition verdict, recorded after
+    # the action's result. Fields: action (kind/target summary),
+    # expect (the expectation kind), ok, note (short evidence —
+    # presence/counts only for masked or secret-bearing fields,
+    # never their content).
+    "postcondition",
 )
 
 GENESIS = "genesis"

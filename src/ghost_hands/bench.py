@@ -3736,6 +3736,165 @@ def case_v115_validation_control():
     return True
 
 
+class _GatedCartDriver(FakeDriver):
+    """Bench fixture (v1.16): a promo overlay covers the page.
+    While it is up, clicks on "Add to cart" are swallowed — the
+    driver reports the click, and nothing in the world changes
+    (Skyvern's silent no-op). Dismissing the overlay swaps in the
+    uncovered page, where Add works through the usual
+    data-append-to mechanics."""
+
+    _COVERED = (
+        "<html><head><title>Cart</title></head><body>"
+        "<h1>Trail shop</h1>"
+        '<div id="promo"><p>Sale! Everything must go!</p></div>'
+        '<label>Qty <input id="qty" name="qty" type="text"></label>'
+        "<button>Dismiss</button>"
+        '<button data-append-to="cart" data-from-field="qty">'
+        "Add to cart</button>"
+        '<ul id="cart"></ul>'
+        "</body></html>"
+    )
+    _UNCOVERED = (
+        "<html><head><title>Cart</title></head><body>"
+        "<h1>Trail shop</h1>"
+        '<label>Qty <input id="qty" name="qty" type="text"></label>'
+        '<button data-append-to="cart" data-from-field="qty">'
+        "Add to cart</button>"
+        '<ul id="cart"></ul>'
+        "</body></html>"
+    )
+
+    def __init__(self, start_url: str) -> None:
+        super().__init__({start_url: self._COVERED}, start_url=start_url)
+        self.covered = True
+
+    def act(self, action, element):
+        if (
+            action.kind == "click"
+            and element is not None
+            and element.name == "Add to cart"
+            and self.covered
+        ):
+            return (
+                f'clicked [{element.number}] "Add to cart" '
+                "(covered by the promo overlay)"
+            )
+        result = super().act(action, element)
+        if (
+            action.kind == "click"
+            and element is not None
+            and element.name == "Dismiss"
+            and self.covered
+        ):
+            self.covered = False
+            self._overrides[self._url] = self._UNCOVERED
+        return result
+
+
+_V116_URL = "https://v116.local/cart"
+
+
+def case_v116_silent_noop_surfaced_immediately():
+    # Per-action postconditions (v1.16): the Add click is
+    # swallowed by the overlay. With postconditions off, the
+    # blind flow claims done over an empty cart and nothing ever
+    # notices (asserted first). With them on, the swallowed
+    # click's postcondition fails AT ITS OWN STEP — the verdict
+    # is on the trail before the next step is even decided — the
+    # flow dismisses the overlay, clicks Add on the uncovered
+    # page (its new number), and the cart really fills.
+    blind = [
+        {"kind": "type", "target": 1, "text": "2"},
+        {"kind": "click", "target": 3},
+        {"kind": "done", "summary": "added 2 to the cart"},
+    ]
+    off_driver = _GatedCartDriver(_V116_URL)
+    off_trail = Trail()
+    off_report = Runner(
+        off_driver,
+        ScriptedDecider(blind),
+        approver=lambda a: True,
+        trail=off_trail,
+    ).run("add 2 to the cart")
+    assert off_report.stop_reason == "done"
+    assert "<li>2</li>" not in off_driver.snapshot_html()
+    assert not [e for e in off_trail.events if e["type"] == "postcondition"]
+
+    rescue = [
+        {"kind": "type", "target": 1, "text": "2"},
+        {"kind": "click", "target": 3},  # swallowed by the overlay
+        {"kind": "click", "target": 2},  # Dismiss: the working path
+        {"kind": "click", "target": 2},  # Add, at its new number
+        {"kind": "done", "summary": "added 2 to the cart"},
+    ]
+    driver = _GatedCartDriver(_V116_URL)
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(rescue),
+        approver=lambda a: True,
+        trail=trail,
+        postconditions=True,
+    ).run("add 2 to the cart")
+    assert report.stop_reason == "done", report.summary
+    assert "<li>2</li>" in driver.snapshot_html()
+    checks = [e for e in trail.events if e["type"] == "postcondition"]
+    failures = [c for c in checks if not c["ok"]]
+    assert len(failures) == 1 and failures[0]["step"] == 2
+    assert report.postcondition_failures == 1
+    # Surfaced at the step it happened: the failed verdict sits
+    # in the trail BEFORE the next step's decide event — the
+    # decider was told before it chose the Dismiss click, not
+    # steps later.
+    fail_at = trail.events.index(failures[0])
+    decide3_at = next(
+        i
+        for i, e in enumerate(trail.events)
+        if e["type"] == "decide" and e["step"] == 3
+    )
+    assert fail_at < decide3_at
+    assert verify_trail(trail.events)["ok"]
+    return True
+
+
+def case_v116_effective_click_control():
+    # The control: ordinary effective actions pass their
+    # postconditions with zero extra steps and zero failures —
+    # the mechanism is invisible when the world cooperates.
+    url = "https://v116.local/todo"
+    pages = {
+        url: (
+            "<html><head><title>Todo</title></head><body>"
+            '<input id="new-item" name="new-item" type="text" '
+            'placeholder="New item">'
+            '<button data-append-to="items" data-from-field="new-item">'
+            "Add item</button>"
+            '<ul id="items"><li>Existing item</li></ul>'
+            "</body></html>"
+        )
+    }
+    steps = [
+        {"kind": "type", "target": 1, "text": "ship it"},
+        {"kind": "click", "target": 2},
+        {"kind": "done", "summary": "added"},
+    ]
+    trail = Trail()
+    report = Runner(
+        FakeDriver(pages, start_url=url),
+        ScriptedDecider(steps),
+        approver=lambda a: True,
+        trail=trail,
+        postconditions=True,
+    ).run("add 'ship it' to the list")
+    assert report.stop_reason == "done", report.summary
+    assert report.steps == 2
+    checks = [e for e in trail.events if e["type"] == "postcondition"]
+    assert len(checks) == 2 and all(c["ok"] for c in checks)
+    assert report.postcondition_failures == 0
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -3864,6 +4023,8 @@ CASES = [
     ("v1.14 extract progress: novel extract results on an unchanging map reset the stuck counter; the run finishes", case_v114_extract_progress),
     ("v1.15 premature-done trap: a success banner with nothing filed fools the old counting; the checklist's code-checked reference rejects the done and the run files for real", case_v115_premature_done_trap),
     ("v1.15 validation control: a correct flow satisfies the checklist at the first done claim, no loop-back", case_v115_validation_control),
+    ("v1.16 silent no-op: a covered Add click changes nothing; its failed postcondition is on the trail before the next step is decided, and the flow completes via Dismiss", case_v116_silent_noop_surfaced_immediately),
+    ("v1.16 effective-click control: a type and an append click pass their postconditions with zero extra steps", case_v116_effective_click_control),
 ]
 
 

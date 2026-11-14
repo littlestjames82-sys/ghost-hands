@@ -116,6 +116,13 @@ from .governor import Governor, Policy, classify
 from .phone_approver import ObservingDecider, PhoneApprover, build_summary
 from .phone_proof import run_phone_proof
 from .policies import PolicyPack, load_pack
+from .postconditions import (
+    Expectation,
+    PostconditionOutcome,
+    check_expectation,
+    derive_expectation,
+    postconditions_enabled,
+)
 from .runner import RunReport, Runner
 from .secrets import SecretProvider
 from .simphone import SimPhoneDriver
@@ -145,6 +152,8 @@ __all__ = [
     "DeterministicValidator",
     "Element",
     "ElementMap",
+    "Expectation",
+    "PostconditionOutcome",
     "FakeDriver",
     "ItemVerdict",
     "LLMValidator",
@@ -173,12 +182,15 @@ __all__ = [
     "SimPhoneDriver",
     "Trail",
     "build_summary",
+    "check_expectation",
     "classify",
+    "derive_expectation",
     "evaluate_verify",
     "export_ghost_hands_script",
     "governor_from_env",
     "load_pack",
     "plan_key",
+    "postconditions_enabled",
     "read_trail",
     "run_doctor",
     "run_phone_proof",

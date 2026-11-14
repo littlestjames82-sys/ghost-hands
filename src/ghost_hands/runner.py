@@ -72,6 +72,25 @@ the distinct honest reason ``unverified`` and the never-satisfied
 items named in the summary. Checklist and verdicts are trail
 events, so the record shows *why* a done was accepted or sent
 back. Off (the default), nothing changes.
+
+Per-action postconditions (v1.16, P1-8): after an action
+executes — the heal chain fully resolved, so the verdict judges
+the net outcome, never an intermediate stale attempt — the
+effect the action exists to produce is checked in code against
+a fresh perception (see postconditions.py for the expectation
+table): a typed field must hold what was typed, a link click
+must land on its href, any other click must change something
+observable. A failure is feedback, not a stop: a
+``postcondition`` trail event, a specific note in the decider's
+history, and a one-shot blind-retry refusal — the decider's
+very next action may not repeat the failed (kind, target)
+signature exactly. The refusal is recorded as a result, like
+the require-verify gate's rejections: it consumes the step's
+decision, executes nothing, and counts as no step taken. Pure
+code, no model calls — but opt-in all the same
+(``postconditions=True``, or GHOST_HANDS_POSTCONDITIONS=1),
+following the require-verify and validator precedent: off,
+nothing changes.
 """
 
 from __future__ import annotations
@@ -89,6 +108,11 @@ from .deciders import Decider
 from .errors import HandsError, UnhealableTargetError
 from .eyes import ElementMap
 from .governor import ASK, Decision, Governor, Policy
+from .postconditions import (
+    check_expectation,
+    derive_expectation,
+    postconditions_enabled,
+)
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
 from .trail import Trail
 from .validator import Verdict, validator_for
@@ -131,6 +155,10 @@ class RunReport:
     # how many of them failed — counted off the trail at stop time.
     validations: int = 0
     validation_failures: int = 0
+    # v1.16: per-action postconditions checked after execution,
+    # and how many failed — counted off the trail at stop time.
+    postconditions: int = 0
+    postcondition_failures: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -151,6 +179,8 @@ class RunReport:
             "error_recoveries": self.error_recoveries,
             "validations": self.validations,
             "validation_failures": self.validation_failures,
+            "postconditions": self.postconditions,
+            "postcondition_failures": self.postcondition_failures,
         }
 
 
@@ -179,6 +209,7 @@ class Runner:
         validate: bool = False,
         validator=None,
         validation_attempts: int = 3,
+        postconditions: Optional[bool] = None,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -234,6 +265,14 @@ class Runner:
         self.validator = validator
         self.validation_attempts = max(1, validation_attempts)
         self._resolved_validator = None
+        # v1.16 (P1-8): per-action postconditions — after an action
+        # executes, its expected effect is checked in code against
+        # a fresh perception, and a failure feeds back immediately
+        # (plus a one-shot blind-retry refusal; see
+        # postconditions.py). Opt-in, following the require-verify
+        # precedent: the argument wins, else
+        # GHOST_HANDS_POSTCONDITIONS must be truthy.
+        self.postconditions = postconditions_enabled(postconditions)
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -338,6 +377,15 @@ class Runner:
         # failed validations spent so far.
         checklist_items: Optional[list] = None
         validation_failures = 0
+        # v1.16: the armed blind-retry refusal — the (signature,
+        # failure detail) of the action whose postcondition just
+        # failed. The next action to reach the governance point is
+        # checked against it, whatever its source (decider, batch
+        # queue, plan cache): an exact repeat is refused once;
+        # anything else spends the arm, because the decider has
+        # re-observed or moved on — the Stagehand rule is about
+        # the *blind* repeat, not about ever trying again.
+        pending_refusal: Optional[tuple] = None
 
         def run_validation(step_no: int, rendered_map: str) -> Verdict:
             """v1.15: evaluate the checklist at a done claim. Builds
@@ -784,6 +832,34 @@ class Runner:
                 )
                 return self._stop(report, step, "done", action.summary or "goal complete")
 
+            if pending_refusal is not None:
+                # v1.16 blind-retry refusal (Stagehand's "never
+                # retry act() — retry observe()", enforced): the
+                # very next action may not repeat a just-failed
+                # action exactly. The refusal is recorded like the
+                # require-verify gate's rejections — it consumes
+                # this step's decision, executes nothing, and is
+                # not a step taken (report.steps counts executions).
+                # Runner-internal heals never pass this point, so
+                # they are never refused; whatever the decider
+                # chooses next goes through govern/approve as usual.
+                armed_signature, armed_detail = pending_refusal
+                pending_refusal = None
+                if action.signature() == armed_signature:
+                    message = (
+                        "refused: the previous action failed its "
+                        f"postcondition ({armed_detail}); repeating "
+                        "it blind is refused — re-observe the page "
+                        "and choose a different action"
+                    )
+                    self.trail.record(
+                        "result", step, ok=False, result=message
+                    )
+                    history.append(
+                        {"kind": "system", "note": f"Refused: {message}"}
+                    )
+                    continue
+
             # stuck: same action at the same target, three times
             signature = action.signature()
             seen_actions[signature] = seen_actions.get(signature, 0) + 1
@@ -1039,6 +1115,31 @@ class Runner:
                     else None,
                 }
             )
+            # v1.16 (P1-8): judge the action's net outcome. The
+            # expectation derives from the FINAL action/element
+            # pair (the heal chain has fully resolved by here),
+            # and the check compares it against a fresh perception
+            # — never an intermediate stale attempt. A failure
+            # tells the decider immediately and arms the one-shot
+            # blind-retry refusal checked above.
+            if self.postconditions:
+                expectation = derive_expectation(action, element, pre_url=url)
+                if expectation is not None:
+                    failure_detail = self._check_postcondition(
+                        step,
+                        expectation,
+                        action,
+                        pre_url=url,
+                        pre_signature=sig,
+                    )
+                    if failure_detail is not None:
+                        pending_refusal = (action.signature(), failure_detail)
+                        history.append(
+                            {
+                                "kind": "system",
+                                "note": f"Postcondition failed: {failure_detail}",
+                            }
+                        )
 
         return self._stop(report, self.step_budget, "budget", "step budget exhausted")
 
@@ -1071,6 +1172,58 @@ class Runner:
             self.trail.record(
                 "cache", self._current_step, phase="store", key=key
             )
+
+    def _check_postcondition(
+        self,
+        step: int,
+        expectation,
+        action: Action,
+        *,
+        pre_url: str,
+        pre_signature: str,
+    ) -> Optional[str]:
+        """v1.16 (P1-8): judge one executed action's net outcome
+        against a fresh perception, taken with the loop's own
+        machinery — the quiet wait, then the driver's eyes; no
+        sleeps of its own, and no ``perceive`` trail event (the
+        verdict event carries the evidence, and the next step
+        perceives for the record as always). Records the
+        ``postcondition`` event and returns the failure detail —
+        for the decider's history note and the blind-retry arm —
+        or None when the expectation held. An abstention (the
+        outcome is not measurable: an unperceivable field, a
+        re-perception that itself fails) records nothing and
+        returns None rather than guessing; a persistent
+        perception failure surfaces at the next step's own
+        perceive, on the record."""
+        self._quiet_wait()
+        try:
+            post_map = self._perceive_map()
+            post_url = post_map.url or self.driver.current_url()
+        except Exception:
+            return None
+        outcome = check_expectation(
+            expectation,
+            pre_url=pre_url,
+            pre_signature=pre_signature,
+            post_map=post_map,
+            post_url=post_url,
+        )
+        if outcome is None:
+            return None
+        self.trail.record(
+            "postcondition",
+            step,
+            action={"kind": action.kind, "target": action.target},
+            expect=expectation.kind,
+            ok=outcome.ok,
+            note=outcome.note,
+        )
+        if outcome.ok:
+            return None
+        if outcome.note.startswith(expectation.describe):
+            return outcome.note
+        return f"{expectation.describe} — {outcome.note}"
 
     def _attempt_heal(
         self,
@@ -1188,6 +1341,16 @@ class Runner:
             1
             for ev in self.trail.events
             if ev.get("type") == "validation" and not ev.get("ok")
+        )
+        # v1.16: postcondition totals, counted off the trail like
+        # the validation numbers above.
+        report.postconditions = sum(
+            1 for ev in self.trail.events if ev.get("type") == "postcondition"
+        )
+        report.postcondition_failures = sum(
+            1
+            for ev in self.trail.events
+            if ev.get("type") == "postcondition" and not ev.get("ok")
         )
         if report.steps == 0:
             report.steps = acct["steps"]

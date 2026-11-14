@@ -157,6 +157,50 @@ The revalidation release (v1.12 wave):
   trap (a success banner over an unfiled application) that
   the old counting accepts and the validator catches, plus
   a first-claim control.
+- **Per-action postconditions (v1.16 wave).** The v1.15
+  validator judges a done claim; this wave judges every
+  action the moment it lands (roadmap P1-8 — Skyvern's
+  silent no-op click, discovered steps later or never, is
+  the motivating failure). From the action and the
+  pre-action perception the Runner derives a deterministic
+  expectation — no model is consulted — and after the
+  action executes, the heal chain fully resolved so the
+  verdict judges the net outcome, the expectation is
+  compared in code against a fresh perception: a typed or
+  selected field must hold the value it was given (a
+  masked field is checked by its marker's presence+length
+  only, a secret-placeholder action by presence only, and
+  a password field — never perceivable — is not checked);
+  a filled form's fields must hold their values; a link
+  click must land on its href; a checkbox must toggle and
+  a radio end checked; any other click must change
+  something observable — the URL or the map signature. A
+  failure is feedback, not a stop: a hash-chained
+  `postcondition` trail event, a specific note in the
+  decider's history at its very next decision, and a
+  one-shot blind-retry refusal — Stagehand's "never retry
+  act(), retry observe()" enforced in code: if the
+  decider's next action repeats the failed (kind, target)
+  signature exactly, that one repetition is refused with
+  an explanatory result instead of executing (it consumes
+  the step's decision, counts as no step taken, and
+  runner-internal heals are never refused). Kinds with no
+  derivable expectation — observations, key presses,
+  scrolls, transient gestures, raw-coordinate clicks,
+  uploads, viewport changes — are skipped, each with its
+  reason recorded in the module. Activation is opt-in
+  (`Runner(postconditions=True)` or
+  `GHOST_HANDS_POSTCONDITIONS=1`), following the
+  require-verify and validator precedent: default-on was
+  tried first — the checks are pure code — but an
+  existing test pins the exact trail event sequence of a
+  default run, and a wave that is off must change
+  nothing. `RunReport` gains `postconditions` /
+  `postcondition_failures` counted off the trail. The
+  bench gains a covered-button case — an Add click
+  swallowed by a promo overlay, surfaced by its failed
+  postcondition at the step it happened — plus an
+  effective-click control.
 
 ## [1.11.0] — November 12, 2026
 
