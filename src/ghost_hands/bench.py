@@ -3895,6 +3895,66 @@ def case_v116_effective_click_control():
     return True
 
 
+def case_v117_taxonomy():
+    # Failure taxonomy (v1.17): a doomed run — the field vanishes
+    # between perception and the type, the heal re-resolution
+    # searches and finds nothing — ends classified from its own
+    # record: status ERROR, label VANISHED, on the report AND on
+    # the trail's stop event, chain intact. The happy-path control
+    # classifies (SUCCESS, None).
+    url = "https://v117.local/todo"
+    v1 = (
+        "<html><head><title>Todo</title></head><body>"
+        '<input id="new-item" name="new-item" type="text" '
+        'placeholder="New item">'
+        '<button data-append-to="items" data-from-field="new-item">'
+        "Add item</button>"
+        '<ul id="items"><li>Existing item</li></ul>'
+        "</body></html>"
+    )
+    gone = (
+        "<html><head><title>Gone</title></head><body>"
+        "<p>Nothing here.</p></body></html>"
+    )
+    driver = FakeDriver({url: v1}, start_url=url)
+    driver.mutate_hook = lambda d: d.pages.__setitem__(url, gone)
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "x"},
+                {"kind": "done", "summary": "typed"},
+            ]
+        ),
+        trail=trail,
+        error_recovery_attempts=0,
+    ).run("bench v1.17 taxonomy: type into a vanishing field")
+    assert report.stop_reason == "error", report.summary
+    assert (report.status, report.failure_label) == ("ERROR", "VANISHED"), (
+        report.status,
+        report.failure_label,
+    )
+    stops = [e for e in trail.events if e["type"] == "stop"]
+    assert len(stops) == 1
+    assert stops[0]["status"] == "ERROR" and stops[0]["failure_label"] == "VANISHED"
+    assert verify_trail(trail.events)["ok"]
+    # Control: the same flow on a stable page classifies SUCCESS.
+    trail2 = Trail()
+    report2 = Runner(
+        FakeDriver({url: v1}, start_url=url),
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 1, "text": "x"},
+                {"kind": "done", "summary": "typed"},
+            ]
+        ),
+        trail=trail2,
+    ).run("bench v1.17 taxonomy: happy control")
+    assert (report2.status, report2.failure_label) == ("SUCCESS", None)
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -4025,6 +4085,7 @@ CASES = [
     ("v1.15 validation control: a correct flow satisfies the checklist at the first done claim, no loop-back", case_v115_validation_control),
     ("v1.16 silent no-op: a covered Add click changes nothing; its failed postcondition is on the trail before the next step is decided, and the flow completes via Dismiss", case_v116_silent_noop_surfaced_immediately),
     ("v1.16 effective-click control: a type and an append click pass their postconditions with zero extra steps", case_v116_effective_click_control),
+    ("v1.17 failure taxonomy: a run whose target vanishes mid-flight classifies (ERROR, VANISHED) on the report and the stop event; the happy control classifies (SUCCESS, None)", case_v117_taxonomy),
 ]
 
 

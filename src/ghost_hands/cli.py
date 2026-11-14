@@ -24,6 +24,10 @@ from .validator import validate_enabled
 
 def _print_report(report, trail: Trail) -> None:
     print(f"stop: {report.stop_reason} — {report.summary}")
+    print(
+        f"status: {report.status}"
+        + (f" — failure: {report.failure_label}" if report.failure_label else "")
+    )
     print(f"steps executed: {report.steps}")
     print(f"actions by class: {report.actions_by_class}")
     print(
@@ -312,6 +316,8 @@ def cmd_batch(args) -> int:
                     "name": name,
                     "stop_reason": report.stop_reason,
                     "summary": report.summary,
+                    "status": report.status,
+                    "failure_label": report.failure_label,
                     "llm_calls": report.llm_calls,
                     "llm_tokens": report.llm_prompt_tokens
                     + report.llm_completion_tokens,

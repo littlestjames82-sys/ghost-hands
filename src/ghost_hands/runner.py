@@ -91,6 +91,16 @@ code, no model calls — but opt-in all the same
 (``postconditions=True``, or GHOST_HANDS_POSTCONDITIONS=1),
 following the require-verify and validator precedent: off,
 nothing changes.
+
+Failure taxonomy (v1.17, P3-13): at ``_stop()``, the finished run
+is classified from its own recorded signals — a final ``status``
+(SUCCESS / NO_TARGET / BLOCKED / TIMEOUT / ERROR) and at most one
+``failure_label`` (STALE / MOVED / VANISHED / OCCLUDED / BLOCKED /
+COST_CAP / NO_TARGET / WRONG_ANSWER) — and the verdict is written
+onto the ``stop`` event itself and the RunReport (see
+taxonomy.py for the mapping and its precedence rules). Pure
+instrumentation: the classifier runs after the run is already
+over and cannot change any decision, stop, or step.
 """
 
 from __future__ import annotations
@@ -114,6 +124,7 @@ from .postconditions import (
     postconditions_enabled,
 )
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
+from .taxonomy import classify_run
 from .trail import Trail
 from .validator import Verdict, validator_for
 from .verify import evaluate_verify
@@ -159,6 +170,17 @@ class RunReport:
     # and how many failed — counted off the trail at stop time.
     postconditions: int = 0
     postcondition_failures: int = 0
+    # v1.17: the failure-taxonomy classification (P3-13), computed
+    # in _stop() from the stop reason, the summary, and the trail:
+    # ``status`` is one of taxonomy.STATUSES, ``failure_label`` one
+    # of taxonomy.FAILURE_LABELS or None (always None on SUCCESS).
+    status: str = ""
+    failure_label: Optional[str] = None
+
+    @property
+    def final_status(self) -> str:
+        """The benchmark CSV's name (scope §7) for ``status``."""
+        return self.status
 
     def to_dict(self) -> dict:
         return {
@@ -181,6 +203,8 @@ class RunReport:
             "validation_failures": self.validation_failures,
             "postconditions": self.postconditions,
             "postcondition_failures": self.postcondition_failures,
+            "status": self.status,
+            "failure_label": self.failure_label,
         }
 
 
@@ -1313,8 +1337,19 @@ class Runner:
             stop_url = self.driver.current_url() or ""
         except Exception:
             stop_url = ""
+        # v1.17 (P3-13): classify the finished run from its own
+        # recorded signals and write the verdict onto the stop
+        # event itself — the classification is part of the audit
+        # record, carried as fields on an existing event type, so
+        # the trail's event-type sequence is exactly what it was.
+        # The classifier reads the trail BEFORE this event lands:
+        # its inputs are the run's signals, never its own verdict.
+        report.status, report.failure_label = classify_run(
+            reason, summary, self.trail.events
+        )
         self.trail.record(
             "stop", step, reason=reason, summary=summary, url=stop_url,
+            status=report.status, failure_label=report.failure_label,
             **usage_fields,
         )
         acct = self.trail.accounting()

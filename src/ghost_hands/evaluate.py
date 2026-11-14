@@ -243,6 +243,10 @@ class TaskScore:
     llm_prompt_tokens: int = 0
     llm_completion_tokens: int = 0
     llm_calls: int = 0
+    # v1.17: the run's failure-taxonomy classification (P3-13),
+    # carried under the benchmark CSV's column names (scope §7).
+    final_status: str = ""
+    failure_label: Optional[str] = None
     extra: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
@@ -264,6 +268,8 @@ class TaskScore:
             "llm_prompt_tokens": self.llm_prompt_tokens,
             "llm_completion_tokens": self.llm_completion_tokens,
             "llm_calls": self.llm_calls,
+            "final_status": self.final_status,
+            "failure_label": self.failure_label,
             "extra": self.extra,
         }
 
@@ -1061,6 +1067,8 @@ def _score_task(
         llm_prompt_tokens=report.llm_prompt_tokens,
         llm_completion_tokens=report.llm_completion_tokens,
         llm_calls=report.llm_calls,
+        final_status=report.status,
+        failure_label=report.failure_label,
         extra=extra,
     )
 

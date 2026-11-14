@@ -126,6 +126,7 @@ from .postconditions import (
 from .runner import RunReport, Runner
 from .secrets import SecretProvider
 from .simphone import SimPhoneDriver
+from .taxonomy import FAILURE_LABELS, STATUSES, classify_run
 from .trail import Trail, read_trail, verify_trail
 from .validator import (
     ChecklistItem,
@@ -181,9 +182,12 @@ __all__ = [
     "SecretProvider",
     "SimPhoneDriver",
     "Trail",
+    "FAILURE_LABELS",
+    "STATUSES",
     "build_summary",
     "check_expectation",
     "classify",
+    "classify_run",
     "derive_expectation",
     "evaluate_verify",
     "export_ghost_hands_script",

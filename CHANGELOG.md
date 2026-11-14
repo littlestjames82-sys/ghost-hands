@@ -8,6 +8,41 @@ README's "Honest status" for what remains unproven at each step.
 
 ## [Unreleased]
 
+- **Failure taxonomy (v1.17 wave).** Every run now ends with
+  a classification derived deterministically at stop time
+  from its own recorded signals (roadmap P3-13 — the
+  Online-Mind2Web benchmark's pre-flight gate: a published
+  failure breakdown, not just a pass rate). The RunReport
+  gains `status` — exactly one of SUCCESS / NO_TARGET /
+  BLOCKED / TIMEOUT / ERROR — and `failure_label`, at most
+  one of STALE / MOVED / VANISHED / OCCLUDED / BLOCKED /
+  COST_CAP / NO_TARGET / WRONG_ANSWER, None on success; the
+  eval TaskScore and suite JSON carry the same verdict as
+  `final_status` / `failure_label`, the CSV column names.
+  The mapping (new module `taxonomy.py`, precedence-ordered
+  so the label names the proximate cause): done is SUCCESS;
+  a governor/approver denial is BLOCKED; the v1.15
+  `unverified` stop and verify-family failures are
+  WRONG_ANSWER; the LLM token cap is (TIMEOUT, COST_CAP)
+  while step exhaustion is TIMEOUT with the label of the
+  last recorded failure signal; a terminal target failure
+  reads its own evidence — an occlusion verdict from
+  revalidation is OCCLUDED, a re-resolution that searched
+  and found nothing is VANISHED, a never-heal refusal or an
+  unsearched stale pointer is STALE (the refusal's fate is
+  unsearched by design, and the module says so); and a run
+  whose perceptions never contained a single candidate and
+  which never landed a targeted action is NO_TARGET, under
+  a pinned conservative definition. The verdict rides the
+  audit record as fields on the existing `stop` event — no
+  new event type, so the default trail's event-type
+  sequence is unchanged and `verify_trail` validates as
+  before. Pure instrumentation: the classifier runs after
+  the run is over and changes no decision, stop, or step.
+  The bench gains a taxonomy case (a vanishing target
+  classifies (ERROR, VANISHED); the happy control
+  (SUCCESS, None)).
+
 ## [1.16.0] — November 14, 2026
 
 The proof release: five waves built on GitHub `main` since
