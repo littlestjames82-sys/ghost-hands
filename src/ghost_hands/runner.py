@@ -42,7 +42,12 @@ it and ``quiet_wait`` is on.
 
 Honest stop reasons: done / budget / denied / stuck / error. Stuck means
 the same (action, target) three times, or an unchanged element map for
-three consecutive steps.
+three consecutive steps. v1.14: the unchanged-map rule counts *steps
+that taught the run nothing* — a step whose action result is a
+non-empty string never before seen in this run is progress (the world
+answered with new information; the map simply doesn't show it) and
+resets the unchanged counter. Identical repeated results, and empty
+results, never reset it, so a genuinely looping run still stops.
 
 v0.3: when the driver offers ``perceive()`` (ChromiumDriver's DOM/AX
 eyes), the Runner perceives through it instead of the HTML snapshot —
@@ -253,6 +258,34 @@ class Runner:
         last_signature: Optional[str] = None
         prev_map = None  # v1.4: last step's map, for change notes
         unchanged = 0
+        # v1.14 (content visibility): every step result this run has
+        # already produced. The unchanged-map stuck rule below asks
+        # "did the last steps teach us anything?" — a map can sit
+        # perfectly still while exploration pays off (an extract
+        # mode returning the page's table after two empty modes),
+        # and counting those steps as "unchanged" stops exactly the
+        # runs that are making progress. So: a step whose result is
+        # a non-empty string NOT in this set counts as progress and
+        # resets the unchanged counter. The set is deliberately NOT
+        # cleared by recovery/error-recovery: re-learning a known
+        # fact after a nudge is not new progress. Identical repeats
+        # and empty results never reset anything — the rule weakens
+        # only where new information demonstrably arrived. It is
+        # applied to every executed action's result, not just
+        # extract: novelty is a property of what the world answered,
+        # not of which verb asked, and the repeated-(action,target)
+        # rule below still guards true loops on its own terms.
+        seen_results: set[str] = set()
+
+        def note_result(text: object) -> None:
+            """v1.14: feed one executed step's result into the
+            stuck detector's progress signal (see seen_results)."""
+            nonlocal unchanged
+            if not isinstance(text, str) or not text:
+                return
+            if text not in seen_results:
+                seen_results.add(text)
+                unchanged = 0
         verified_ok = False  # a verify action has passed in this run
         done_rejections = 0  # require_verify gate: dones sent back
         recovery_left = self.recovery_attempts
@@ -376,7 +409,10 @@ class Runner:
                 ),
             )
 
-            # stuck: map unchanged across consecutive steps
+            # stuck: map unchanged across consecutive steps — where
+            # "unchanged" counts steps since the last *progress*:
+            # a signature change, or (v1.14) a step result the run
+            # had never seen before (see note_result).
             sig = element_map.signature()
             if sig == last_signature:
                 unchanged += 1
@@ -647,6 +683,7 @@ class Runner:
                     return self._stop(report, step, "error", message)
                 verified_ok = True
                 report.results.append(message)
+                note_result(message)  # v1.14: progress signal
                 report.steps += 1
                 executed_plan.append(
                     {
@@ -839,6 +876,7 @@ class Runner:
                     result_fields["mode"] = action.mode or "text"
             self.trail.record("result", step, ok=True, result=result, **result_fields)
             report.results.append(result)
+            note_result(result)  # v1.14: progress signal
             report.steps += 1
             executed_plan.append(
                 {

@@ -397,6 +397,39 @@ def apply_field_value_mask(el: "Element") -> None:
         el.text = masked
 
 
+# ---------------------------------------------------------------------------
+# Page text (v1.14): content visibility
+# ---------------------------------------------------------------------------
+# The element map lists interactive elements only — on a content
+# page (an article, a results page, the eval's trail-towns page)
+# that can be a single "Back" link while the page's plain text
+# holds everything the goal asks about. A decider staring at that
+# map cannot tell the answer is already on the page; it guesses
+# extract modes and burns its stuck budget exploring. So every
+# map also carries a short excerpt of the page's visible text:
+# whitespace-collapsed, script/style content excluded, capped at
+# PAGE_TEXT_LIMIT chars with a truncation marker when cut. The
+# excerpt is page content, like the result text the trail already
+# records — it is NOT a field value, so the v1.13 masking
+# discipline does not apply to it. Because render() carries the
+# excerpt and signature() hashes the render, a text-only page
+# change (a result line appearing, a banner swapping) moves the
+# map signature too.
+
+PAGE_TEXT_LIMIT = 800
+PAGE_TEXT_HEADER = "--- page text ---"
+_PAGE_TEXT_TRUNCATION = " …[truncated]"
+
+
+def page_text_excerpt(raw: str) -> str:
+    """Collapse + cap a body's raw visible text into the excerpt
+    stored on a map. "" when the page shows no text."""
+    text = " ".join((raw or "").split())
+    if len(text) > PAGE_TEXT_LIMIT:
+        text = text[:PAGE_TEXT_LIMIT].rstrip() + _PAGE_TEXT_TRUNCATION
+    return text
+
+
 class _MapParser(HTMLParser):
     def __init__(self, raw_values: bool = False) -> None:
         super().__init__(convert_charrefs=True)
@@ -407,6 +440,12 @@ class _MapParser(HTMLParser):
         self.raw_values = raw_values
         self.elements: list[Element] = []
         self.title: str = ""
+        # v1.14: visible-text collection for the page-text excerpt
+        # — every character-data chunk that is not inside a
+        # <script>/<style> (tracked by _skip_text_depth) and not
+        # the <title> (which is head metadata, not page content).
+        self.text_parts: list[str] = []
+        self._skip_text_depth = 0
         # stack entries: {tag, attrs, text:[], element|None, form_action|None}
         self._stack: list[dict[str, Any]] = []
         self._in_title = False
@@ -551,6 +590,8 @@ class _MapParser(HTMLParser):
 
     # -- HTMLParser hooks -------------------------------------------------
     def handle_starttag(self, tag: str, attrs_list: list) -> None:
+        if tag in ("script", "style"):
+            self._skip_text_depth += 1
         attrs = {k: (v if v is not None else "") for k, v in attrs_list}
         if tag == "option" and self._stack and self._stack[-1]["tag"] == "option":
             # An <option> implicitly closes the previous one; finish
@@ -592,10 +633,14 @@ class _MapParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         if self._in_title:
             self._title_parts.append(data)
+        if not self._skip_text_depth and not self._in_title:
+            self.text_parts.append(data)
         for entry in self._stack:
             entry["text"].append(data)
 
     def handle_endtag(self, tag: str) -> None:
+        if tag in ("script", "style") and self._skip_text_depth:
+            self._skip_text_depth -= 1
         if tag == "title":
             self._in_title = False
             self.title = " ".join("".join(self._title_parts).split())
@@ -690,6 +735,12 @@ class ElementMap:
     title: str = ""
     budget: int = 4000
     source_hash: str = ""
+    # v1.14: the page's visible-text excerpt (already collapsed +
+    # capped by page_text_excerpt) — the content signal render()
+    # appends under PAGE_TEXT_HEADER. "" when the perceiving body
+    # reported no text (an elements-only page, or a body that does
+    # not collect text, e.g. the Android/sim bodies).
+    page_text: str = ""
 
     @classmethod
     def from_html(
@@ -743,17 +794,31 @@ class ElementMap:
             title=parser.title,
             budget=budget,
             source_hash=source_hash,
+            page_text=page_text_excerpt(" ".join(parser.text_parts)),
         )
 
     @classmethod
     def from_elements(
-        cls, items: list[dict[str, Any]], url: str = "", budget: int = 4000
+        cls,
+        items: list[dict[str, Any]],
+        url: str = "",
+        budget: int = 4000,
+        page_text: str = "",
     ) -> "ElementMap":
-        """Accept a driver-supplied, pre-parsed element list."""
+        """Accept a driver-supplied, pre-parsed element list.
+        ``page_text`` is the body's raw visible text; it passes the
+        same collapse + cap as a parsed page, so every body stores
+        the excerpt in one shape."""
         els = [Element.from_dict(d, number=i + 1) for i, d in enumerate(items)]
         _assign_nth(els)
         source_hash = hashlib.sha256(repr(items).encode()).hexdigest()[:16]
-        return cls(elements=els, url=url, budget=budget, source_hash=source_hash)
+        return cls(
+            elements=els,
+            url=url,
+            budget=budget,
+            source_hash=source_hash,
+            page_text=page_text_excerpt(page_text),
+        )
 
     def diff_note(self, previous: Optional["ElementMap"]) -> Optional[str]:
         """v1.4: a one-line summary of what changed since the previous
@@ -899,6 +964,27 @@ class ElementMap:
             return None
         return "\n".join(out)
 
+    def _excerpt_lines(self, limit: int, used: int) -> list[str]:
+        """v1.14: the page-text section for a render, fitted into
+        the budget the element lines left over. The excerpt is
+        already capped at PAGE_TEXT_LIMIT; when the caller's budget
+        leaves less room than that, the excerpt is cut to fit (with
+        the truncation marker, never a silent mid-word chop), and
+        when it leaves less than a meaningful peek (40 chars) the
+        section is omitted rather than shredded — an explicit tiny
+        budget means a tiny map. ``used`` is the caller's honest
+        char count of the lines already produced."""
+        if not self.page_text:
+            return []
+        room = limit - used - (len(PAGE_TEXT_HEADER) + 2)
+        if room < 40:
+            return []
+        text = self.page_text
+        if len(text) > room:
+            text = text[: room - len(_PAGE_TEXT_TRUNCATION)].rstrip()
+            text += _PAGE_TEXT_TRUNCATION
+        return [PAGE_TEXT_HEADER, text]
+
     def render(self, budget: Optional[int] = None) -> str:
         limit = self.budget if budget is None else budget
         lines: list[str] = []
@@ -914,6 +1000,12 @@ class ElementMap:
                 break
             lines.append(line)
             used += len(line) + 1
+        # v1.14: the page-text excerpt rides after the element
+        # lines, inside whatever budget they left (see
+        # _excerpt_lines). A text-only page (no elements at all)
+        # still renders its content.
+        honest_used = sum(len(line) + 1 for line in lines)
+        lines.extend(self._excerpt_lines(limit, honest_used))
         return "\n".join(lines)
 
     def render_focused(self, goal: str, budget: Optional[int] = None) -> str:
@@ -928,7 +1020,14 @@ class ElementMap:
         goal's words and their name/tag/type/href, the best-scoring ones
         are kept, and the kept lines still print in page order under
         their original numbers (an action's target number never
-        changes meaning)."""
+        changes meaning).
+
+        The page-text excerpt (v1.14) is appended in the focused view
+        too: focusing exists for exactly the pages where content can
+        hide behind a long element list, and the excerpt — capped at
+        PAGE_TEXT_LIMIT — is usually the content the goal asks about,
+        so dropping it here would recreate the blindness the excerpt
+        exists to cure."""
         limit = self.budget if budget is None else budget
         full = self.render(budget=10 ** 9)
         if len(full) <= limit:
@@ -949,6 +1048,13 @@ class ElementMap:
         kept: list[Element] = []
         used = 0
         reserve = 90  # room for the omission note
+        if self.page_text:
+            # v1.14: hold room for the page-text section too — in
+            # the focused view the excerpt is chosen content, not
+            # an afterthought (see the docstring above).
+            reserve += len(PAGE_TEXT_HEADER) + 2 + min(
+                len(self.page_text), PAGE_TEXT_LIMIT
+            )
         for el in ranked:
             cost = len(line_for(el)) + 1
             if used + cost + reserve > limit and kept:
@@ -963,6 +1069,8 @@ class ElementMap:
                 f"… focused: {omitted} element(s) not shown "
                 f"(goal-relevant kept; map budget {limit} chars)"
             )
+        honest_used = sum(len(line) + 1 for line in lines)
+        lines.extend(self._excerpt_lines(limit, honest_used))
         return "\n".join(lines)
 
     def signature(self) -> str:

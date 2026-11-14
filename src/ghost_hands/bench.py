@@ -3534,6 +3534,89 @@ def case_v113_effect_feedback():
     return True
 
 
+def case_v114_content_visibility():
+    # Content visibility (v1.14): the multi-hop shape the graded
+    # suite exposed — home -> guides -> a towns page whose ONLY
+    # element is a Back link, while the answer sits in plain page
+    # text. The towns map's elements still show just the link, but
+    # the perceived page-text excerpt now carries the fact, so a
+    # decider can see the answer is already on the page instead of
+    # guessing extract modes blind.
+    pages = {
+        "https://v114.local/home": (
+            "<html><head><title>Home</title></head><body><h1>Home</h1>"
+            '<a href="/guides">Guides</a> <a href="/about">About us</a>'
+            "</body></html>"
+        ),
+        "https://v114.local/guides": (
+            "<html><head><title>Guides</title></head><body><h1>Guides</h1>"
+            '<a href="/towns">Trail towns</a> <a href="/home">Back home</a>'
+            "</body></html>"
+        ),
+        "https://v114.local/towns": (
+            "<html><head><title>Trail towns</title></head><body>"
+            "<h1>Trail towns</h1>"
+            "<p>Oakdale was founded in 1899 at the junction of two "
+            "rail lines.</p>"
+            '<a href="/guides">Back to guides</a>'
+            "</body></html>"
+        ),
+    }
+    driver = FakeDriver(pages, start_url="https://v114.local/home")
+    home = driver.perceive()
+    guides = home.find_by_text("Guides")
+    assert guides is not None
+    driver.act(A.click(guides.number), guides)
+    guides_map = driver.perceive()
+    towns = guides_map.find_by_text("Trail towns")
+    assert towns is not None
+    driver.act(A.click(towns.number), towns)
+    towns_map = driver.perceive()
+    assert [el.name for el in towns_map.elements] == ["Back to guides"]
+    assert "founded in 1899" in towns_map.page_text, towns_map.page_text
+    rendered = towns_map.render()
+    assert "--- page text ---" in rendered, rendered
+    assert "founded in 1899" in rendered, rendered
+    return True
+
+
+def case_v114_extract_progress():
+    # Extract progress (v1.14): on a page whose map never changes,
+    # a decider cycling extract modes gets a DIFFERENT answer from
+    # each mode (the passage, an empty table result, the link list)
+    # — new information every step. The unchanged-map stuck rule
+    # counts steps that taught the run nothing, so those novel
+    # results reset its counter and the run reaches done; with the
+    # pre-v1.14 counting the same script stopped stuck at the
+    # fourth step's perception.
+    url = "https://v114.local/towns"
+    pages = {
+        url: (
+            "<html><head><title>Trail towns</title></head><body>"
+            "<h1>Trail towns</h1>"
+            "<p>Oakdale was founded in 1899 at the junction of two "
+            "rail lines.</p>"
+            '<a href="/guides">Back to guides</a>'
+            "</body></html>"
+        )
+    }
+    steps = [
+        {"kind": "extract", "mode": "text"},
+        {"kind": "extract", "mode": "table"},
+        {"kind": "extract", "mode": "list"},
+        {"kind": "done", "summary": "founded in 1899"},
+    ]
+    report = Runner(
+        FakeDriver(pages, start_url=url),
+        ScriptedDecider(steps),
+        trail=Trail(),
+        recovery_attempts=0,
+    ).run("report Oakdale's founding year")
+    assert report.stop_reason == "done", report.summary
+    assert any("1899" in r for r in report.results), report.results
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -3658,6 +3741,8 @@ CASES = [
     ("v1.12 never-heal: a moved password field refuses re-resolution; the secret lands nowhere", case_v112_never_heal_secret),
     ("v1.12 revalidate: a self-moving button is clicked via live geometry; a removed one raises the stale error", case_v112_revalidate_chromium),
     ("v1.13 effect feedback: the typed value renders in the next map and moves its signature; a typed password never renders; a typed card renders masked", case_v113_effect_feedback),
+    ("v1.14 content visibility: the towns page's only element is a Back link, but its page-text excerpt carries the founding year", case_v114_content_visibility),
+    ("v1.14 extract progress: novel extract results on an unchanging map reset the stuck counter; the run finishes", case_v114_extract_progress),
 ]
 
 

@@ -96,6 +96,32 @@ The revalidation release (v1.12 wave):
   GHOST_HANDS_FIELD_VALUES: `masked` (default), `full` (raw
   values; passwords still never), or `off` (no field values
   stored at all, restoring pre-v1.13 perception).
+- **Content visibility (v1.14 wave).** Every element map now
+  also carries a page-text excerpt: the page's visible text,
+  whitespace-collapsed, script/style content excluded, capped
+  at 800 chars with a truncation marker, rendered in a
+  `--- page text ---` section after the element lines (and in
+  the goal-focused render, inside the budget the element lines
+  leave). The graded multi-hop-fact task exposed the gap: its
+  target page's map was a single "Back to guides" link while
+  the answer sat in plain text the map never showed, so the
+  model guessed extract modes blind. Collection folds into
+  each body's existing perception path — the HTML parser for
+  the fake body, the same single describe evaluate for
+  Chromium's DOM eyes (`body.innerText`), and the AX tree's
+  own StaticText nodes for AX eyes (one DOM text read when the
+  tree carries none) — and because the excerpt rides the
+  render, a text-only page change moves the map signature.
+  The excerpt is page content, not a field value, so the
+  v1.13 masking discipline does not apply to it. The stuck
+  detector learned the companion lesson: its unchanged-map
+  rule now counts steps that taught the run nothing — a step
+  whose action result is a non-empty string never before seen
+  in the run counts as progress and resets the counter, so
+  exploration that pays off (an extract mode returning
+  content after two empty modes) no longer races the stuck
+  clock, while identical repeats and empty results still
+  accumulate exactly as before.
 
 ## [1.11.0] — November 12, 2026
 

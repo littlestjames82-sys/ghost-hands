@@ -995,6 +995,17 @@ function __ghVisible(el) {
   return true;
 }
 function __ghText(el) { return ((el.innerText || el.textContent || '') + '').replace(/\s+/g, ' ').trim(); }
+function __ghPageText() {
+  // v1.14 (content visibility): the page's visible text for the
+  // map's page-text excerpt — body innerText (rendered text only:
+  // no script/style, no hidden subtrees), whitespace-collapsed.
+  // Sliced generously here; eyes.page_text_excerpt applies the
+  // real cap on the Python side, one implementation for all bodies.
+  try {
+    const t = (document.body && document.body.innerText) || '';
+    return t.replace(/\s+/g, ' ').trim().slice(0, 20000);
+  } catch (e) { return ''; }
+}
 function __ghName(el) {
   const al = el.getAttribute('aria-label');
   if (al && al.trim()) return al.trim();
@@ -2008,37 +2019,49 @@ class ChromiumDriver:
         self._launch()
         if self.eyes == "ax":
             return self._perceive_ax()
-        items = None
+        # v1.14: the page text rides the SAME evaluate as the
+        # descriptors — one round trip, folded in, never a second
+        # walk. __ghPageText reads body innerText.
+        describe_js = (
+            "(() => { "
+            + _GH_PRELUDE_JS
+            + " return {descriptors: __ghDescriptors(), pageText: __ghPageText()}; })()"
+        )
+        payload = None
         last_exc: Optional[Exception] = None
         for _ in range(12):
             try:
-                items = self._eval(
-                    "(() => { " + _GH_PRELUDE_JS + " return __ghDescriptors(); })()"
-                )
+                payload = self._eval(describe_js)
                 break
             except HandsError as exc:
                 # Same transient-context retry as snapshot_html().
                 last_exc = exc
                 time.sleep(0.25)
-        if items is None:
+        if payload is None:
             raise HandsError(f"perceive failed after retries: {last_exc}")
-        items = items or []
+        if isinstance(payload, list):
+            # Defensive only: a bare descriptor array carries no text.
+            payload = {"descriptors": payload, "pageText": ""}
+        items = payload.get("descriptors") or []
+        page_text = payload.get("pageText") or ""
         # Settle: subframes (srcdoc) and web components can finish a beat
         # after the top document reports complete. If a second look a
         # moment later sees a different page, believe the later one.
         for _ in range(3):
             time.sleep(0.2)
             try:
-                later = self._eval(
-                    "(() => { " + _GH_PRELUDE_JS + " return __ghDescriptors(); })()"
-                ) or []
+                later_payload = self._eval(describe_js)
             except HandsError:
                 break
+            if not isinstance(later_payload, dict):
+                break
+            later = later_payload.get("descriptors") or []
             if len(later) == len(items):
                 break
             items = later
+            page_text = later_payload.get("pageText") or ""
         url = self.current_url()
-        element_map = ElementMap.from_elements(items, url=url)
+        element_map = ElementMap.from_elements(items, url=url, page_text=page_text)
         # v1.13 masking: live values from the in-page descriptor
         # walk pass the field-value policy at ingestion, with the
         # attributes (autocomplete included) as context.
@@ -2054,10 +2077,20 @@ class ChromiumDriver:
         self._send("Accessibility.enable", {})
         tree = self._send("Accessibility.getFullAXTree", {})
         items: list[dict] = []
+        # v1.14: the page-text excerpt for AX eyes comes from the
+        # tree this call already fetched — StaticText node names, in
+        # tree order. (Heading names would double-count: a heading's
+        # text also arrives as its StaticText children.)
+        text_parts: list[str] = []
         for node in tree.get("nodes", []):
             if node.get("ignored"):
                 continue
             role = ((node.get("role") or {}).get("value")) or ""
+            if role == "StaticText":
+                text = ((node.get("name") or {}).get("value")) or ""
+                if str(text).strip():
+                    text_parts.append(str(text))
+                continue
             if role not in _AX_TAG_TYPE:
                 continue
             tag, itype = _AX_TAG_TYPE[role]
@@ -2085,7 +2118,20 @@ class ChromiumDriver:
                 }
             )
         url = self.current_url()
-        element_map = ElementMap.from_elements(items, url=url)
+        page_text = " ".join(text_parts)
+        if not page_text:
+            # The AX tree carried no text nodes (rare — some shadow /
+            # canvas content): one DOM innerText read fills the
+            # excerpt in, the same channel the title fetch below
+            # already uses on every AX perceive.
+            try:
+                page_text = (
+                    self._eval("document.body ? document.body.innerText : ''")
+                    or ""
+                )
+            except HandsError:
+                page_text = ""
+        element_map = ElementMap.from_elements(items, url=url, page_text=page_text)
         # v1.13 masking: AX values pass the same field-value policy
         # (the AX tree carries no autocomplete signal, so the
         # value-shape checks and name/label hints do the work).
