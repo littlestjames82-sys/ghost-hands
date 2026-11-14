@@ -8,6 +8,18 @@ README's "Honest status" for what remains unproven at each step.
 
 ## [Unreleased]
 
+## [1.16.0] — November 14, 2026
+
+The proof release: five waves built on GitHub `main` since
+v1.11.0 (v1.12 through v1.16), each taken from the
+competitive research roadmap and verified the same way:
+full suite and bench locally, CI on the pushed head, and
+the graded real-model suite. That suite passes 8/8 on
+this tree with Muse Spark (35 steps across all eight
+tasks, 6,046 characters of perception in total;
+`docs/eval-muse-spark-v116-2026-11-14.md`). Suite 649
+tests, bench 129/129 at the bump.
+
 The revalidation release (v1.12 wave):
 
 - **Pre-action revalidation + identity heal (P0-1).** The

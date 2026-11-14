@@ -30,38 +30,36 @@ MIT licensed.
 
 MCP Registry: `mcp-name: io.github.littlestjames82-sys/ghost-hands`
 
-> Status: v1.11.0 — live on PyPI and GitHub:
+> Status: v1.16.0 — live on PyPI and GitHub:
 > [PyPI `ghost-hands`](https://pypi.org/project/ghost-hands/)
 > (`pip install ghost-hands`) ·
 > [github.com/littlestjames82-sys/ghost-hands](https://github.com/littlestjames82-sys/ghost-hands) ·
 > [littlestjames82-sys.github.io/ghost-hands](https://littlestjames82-sys.github.io/ghost-hands/).
 >
-> v1.11.0 gathers the ten waves built on GitHub `main` since
-> v1.1.0 (v1.2 through v1.11) into one release: batched model
-> calls with per-action governance,
-> real API-reported token accounting, the require-verify gate, a
-> fifth MCP tool (`hands_verify_trail`), governed recovery from
-> stuck, an LLM token budget cap, goal-driven `hands_run` over
-> MCP, a publishable eval scorecard that now carries real
-> API-reported usage, page-change notes for the decider, a
-> fallback decider for endpoint outages, a `costs` command that
-> totals real token spend across trails, absent-text
-> verification, a `check` preflight that classifies a script
-> before it runs, resuming a run from a dead run's trail (the
-> continuation's trail now chains to its parent's hash), a
-> native Anthropic decider, a `batch` runbook command, a
-> doctor that reports which deciders are configured, bounded
-> retry with backoff for flaky model endpoints (retries counted
-> in the run's accounting), an opt-in JSON mode for stricter
-> model replies, an HTTP JSON API (`ghost-hands serve`), and a
-> completion webhook for finished runs, heal chains that
-> follow an element that moves twice, and error-to-loop
-> recovery that feeds a failed action back to the model
-> instead of ending the run, and an eval-integrity pass
-> that fixed two graded-suite defects a real-model run
-> exposed (the form checker now credits `fill_form`, and
-> the login task teaches the secret-placeholder flow it
-> audits). See the CHANGELOG for the wave-by-wave record.
+> v1.16.0 gathers the five waves built on GitHub `main` since
+> v1.11.0 (v1.12 through v1.16), each one taken from a
+> competitive research roadmap and aimed at a documented
+> failure mode: pre-action revalidation with identity heal,
+> so a moved element is re-resolved in the browser instead
+> of misclicked, and secret-bearing actions never heal at
+> all; live effect feedback in the element map, so the agent
+> sees what its typing actually did, with a masking layer
+> that renders card numbers, SSNs, one-time codes and
+> API-key-shaped values as presence plus length only;
+> content visibility, a capped excerpt of the page's visible
+> text inside the map, plus a stuck detector that counts a
+> novel result as progress; an opt-in evidence-checklist
+> validator that decomposes the goal at the first done
+> claim, code-checks exact values against cited evidence,
+> and loops the run back to work instead of accepting an
+> unproven success; and opt-in per-action postconditions
+> that code-check each action's expected effect and refuse
+> one blind retry of an action that changed nothing. The
+> graded real-model suite passes 8/8 on this tree with
+> Muse Spark (35 steps across all eight tasks, 6,046
+> characters of perception in total; scorecard in
+> `docs/eval-muse-spark-v116-2026-11-14.md`). See the
+> CHANGELOG for the wave-by-wave record.
 
 
 ## What's new in 1.0.0 — the trust-and-cost release
