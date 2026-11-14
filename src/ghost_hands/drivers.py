@@ -55,7 +55,13 @@ from urllib.parse import urljoin, urlparse
 
 from .actions import Action
 from .errors import HandsError, StaleTargetError
-from .eyes import Element, ElementMap, extract_links, extract_table
+from .eyes import (
+    Element,
+    ElementMap,
+    apply_field_value_mask,
+    extract_links,
+    extract_table,
+)
 
 
 class Driver(Protocol):
@@ -142,6 +148,54 @@ class FakeDriver:
 
     def close(self) -> None:
         pass
+
+    def perceive(self) -> ElementMap:
+        """Perception with effect feedback (v1.13): the map is built
+        from the snapshot (so a pending mutate_hook fires exactly as
+        it does for the Runner's snapshot fallback), then each field's
+        LIVE value is overlaid from the field store, so the next
+        perception after a ``type`` shows what actually landed."""
+        html = self.snapshot_html()
+        element_map = ElementMap.from_html(html, url=self._url)
+        self._overlay_field_values(element_map)
+        return element_map
+
+    def _overlay_field_values(self, element_map: ElementMap) -> None:
+        for el in element_map.elements:
+            if el.tag not in ("input", "textarea", "select"):
+                continue
+            itype = (el.type or "").lower()
+            if itype == "password":
+                # Never surface a password's content — not from the
+                # page, not from the field store.
+                el.value = None
+                continue
+            stored: Optional[str] = None
+            for key in (el.id, el.attr_name):
+                if key and key in self.fields:
+                    stored = self.fields[key]
+                    break
+            if stored is None and not el.id and not el.attr_name:
+                # The bare-number key is only trusted for a field with
+                # no stable key of its own — numbers repeat across
+                # pages, ids and names do not.
+                stored = self.fields.get(str(el.number))
+            if stored is None:
+                continue
+            el.value = stored
+            if itype in ("checkbox", "radio"):
+                el.checked = stored.strip().lower() in (
+                    "true",
+                    "yes",
+                    "on",
+                    "1",
+                    "checked",
+                )
+            # v1.13 masking: the overlaid live value passes the
+            # field-value policy before it can render or be
+            # recorded — a typed card lands in the map as a
+            # presence+length marker, never as digits.
+            apply_field_value_mask(el)
 
     # -- internals --------------------------------------------------------
     def _navigate(self, url: str) -> str:
@@ -405,6 +459,16 @@ class FakeDriver:
             stored = self.fields.get(str(element.number))
         if stored is not None:
             return stored
+        # An explicit extract is an operator-intended read of the
+        # LIVE page, so a prefilled value comes from a fresh
+        # unmasked parse of the source — not from the perceived
+        # element, whose value the masking policy may have
+        # replaced with a marker (v1.13).
+        live_el = ElementMap.from_html(raw, url=self._url, _raw=True).get(
+            element.number
+        )
+        if live_el is not None and live_el.value is not None:
+            return live_el.value
         return element.value if element.value is not None else element.name
 
     def _click(self, element: Element) -> str:
@@ -938,7 +1002,9 @@ function __ghName(el) {
   if (t) return t;
   const ph = el.getAttribute('placeholder');
   if (ph) return ph;
-  if (el.tagName === 'INPUT' && el.value) return el.value;
+  // v1.13: a password input's value is never used as its name either —
+  // the name is rendered in the map and recorded in trails.
+  if (el.tagName === 'INPUT' && el.value && (el.getAttribute('type') || '').toLowerCase() !== 'password') return el.value;
   const nm = el.getAttribute('name');
   if (nm) return nm;
   if (el.id) return el.id;
@@ -982,13 +1048,29 @@ function __ghDescribe(el, frameName) {
   const attrs = {};
   for (const a of el.attributes) attrs[a.name] = a.value;
   const form = el.closest ? el.closest('form') : null;
+  const itype = (attrs['type'] || '').toLowerCase();
+  // v1.13 (effect feedback): the LIVE value property, so a decider
+  // sees what its last action left in the field. A select reports its
+  // selected option's text (the value attribute when the option has
+  // no text). A password input's content NEVER leaves the page —
+  // null here keeps it out of the map, descriptors, and trails.
+  let liveValue;
+  if (el.tagName === 'SELECT') {
+    const opt = el.options && el.selectedIndex >= 0 ? el.options[el.selectedIndex] : null;
+    liveValue = opt ? String(opt.text || opt.value || '') : String(el.value || '');
+  } else if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') {
+    liveValue = itype === 'password' ? null : String(el.value);
+  } else {
+    liveValue = attrs['value'] || null;
+  }
   return {
     tag: el.tagName.toLowerCase(), attrs: attrs, name: __ghName(el),
     type: (el.tagName === 'INPUT' || el.tagName === 'BUTTON') ? (attrs['type'] || null) : null,
     href: el.tagName === 'A' ? (attrs['href'] || null) : null,
     id: el.id || null, attr_name: attrs['name'] || null,
     placeholder: attrs['placeholder'] || null,
-    value: (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') ? String(el.value) : (attrs['value'] || null),
+    value: liveValue,
+    checked: (el.tagName === 'INPUT' && (itype === 'checkbox' || itype === 'radio')) ? !!el.checked : null,
     form_action: form ? form.getAttribute('action') : null,
     label: __ghLabel(el), frame: frameName,
     text: __ghText(el) || null
@@ -1957,6 +2039,11 @@ class ChromiumDriver:
             items = later
         url = self.current_url()
         element_map = ElementMap.from_elements(items, url=url)
+        # v1.13 masking: live values from the in-page descriptor
+        # walk pass the field-value policy at ingestion, with the
+        # attributes (autocomplete included) as context.
+        for el in element_map.elements:
+            apply_field_value_mask(el)
         try:
             element_map.title = self._eval("document.title") or ""
         except HandsError:
@@ -1977,10 +2064,14 @@ class ChromiumDriver:
             name = ((node.get("name") or {}).get("value")) or ""
             value = (node.get("value") or {}).get("value")
             attrs: dict[str, str] = {}
+            checked_val = None
             for prop in node.get("properties", []) or []:
                 pval = (prop.get("value") or {}).get("value")
                 if pval is not None:
                     attrs[f"ax-{prop.get('name', '')}"] = str(pval)
+                # v1.13: the AX checked state, as a bool for the map.
+                if prop.get("name") == "checked" and isinstance(pval, bool):
+                    checked_val = pval
             items.append(
                 {
                     "tag": tag,
@@ -1988,12 +2079,18 @@ class ChromiumDriver:
                     "name": name if name else "(unnamed)",
                     "type": itype,
                     "value": None if value is None else str(value),
+                    "checked": checked_val,
                     "attrs": attrs,
                     "backend_id": node.get("backendDOMNodeId"),
                 }
             )
         url = self.current_url()
         element_map = ElementMap.from_elements(items, url=url)
+        # v1.13 masking: AX values pass the same field-value policy
+        # (the AX tree carries no autocomplete signal, so the
+        # value-shape checks and name/label hints do the work).
+        for el in element_map.elements:
+            apply_field_value_mask(el)
         # v1.12 (P0-1): perception-time boxes for AX elements too, via
         # the same getBoxModel resolution actions use (best-effort: a
         # node that will not resolve simply carries no box).

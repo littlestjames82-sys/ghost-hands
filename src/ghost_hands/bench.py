@@ -3486,6 +3486,54 @@ def case_v112_revalidate_chromium():
     return True
 
 
+def case_v113_effect_feedback():
+    # Effect feedback (v1.13): the loop that shifting-page-heal exposed
+    # — perceive, type, perceive again — now closes. The second map
+    # shows the typed value on the field (the signal a decider needs
+    # to conclude instead of re-verifying), and the map signature
+    # moves with the value, so a visually static page no longer reads
+    # as unchanged. A password typed on the same page never renders,
+    # and a card number typed into a plain field renders only as a
+    # presence+length marker (masking at ingestion) — its digits
+    # appear in no render and no descriptor, while the signature
+    # still moves.
+    url = "https://v113.local/notes"
+    pages = {
+        url: (
+            "<!doctype html><html><head><title>Notes</title></head><body>"
+            '<input id="note" name="note" type="text" placeholder="Note">'
+            '<input id="pw" name="pw" type="password" placeholder="Password">'
+            '<input id="card" name="card" type="text" placeholder="Card">'
+            "<button>Save note</button>"
+            "</body></html>"
+        )
+    }
+    driver = FakeDriver(pages, start_url=url)
+    before = driver.perceive()
+    assert 'value="shift proof"' not in before.render()
+    note = before.find_by_text("Note")
+    pw = before.find_by_text("Password")
+    card = before.find_by_text("Card")
+    assert note is not None and pw is not None and card is not None
+    driver.act(A.type(note.number, "shift proof"), note)
+    driver.act(A.type(pw.number, "bench-secret"), pw)
+    after = driver.perceive()
+    rendered = after.render()
+    assert 'value="shift proof"' in rendered, rendered
+    assert "bench-secret" not in rendered, rendered
+    assert after.signature() != before.signature()
+    driver.act(A.type(card.number, "4242 4242 4242 4242"), card)
+    final = driver.perceive()
+    rendered_final = final.render()
+    assert "[masked · 19 chars]" in rendered_final, rendered_final
+    assert "4242" not in rendered_final, rendered_final
+    assert "4242" not in json.dumps(
+        [el.descriptor() for el in final.elements]
+    )
+    assert final.signature() != after.signature()
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -3609,6 +3657,7 @@ CASES = [
     ("v1.12 containment heal: identical twins swap places; the click still lands on the right one", case_v112_containment_heal),
     ("v1.12 never-heal: a moved password field refuses re-resolution; the secret lands nowhere", case_v112_never_heal_secret),
     ("v1.12 revalidate: a self-moving button is clicked via live geometry; a removed one raises the stale error", case_v112_revalidate_chromium),
+    ("v1.13 effect feedback: the typed value renders in the next map and moves its signature; a typed password never renders; a typed card renders masked", case_v113_effect_feedback),
 ]
 
 

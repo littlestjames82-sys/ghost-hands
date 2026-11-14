@@ -54,6 +54,48 @@ The revalidation release (v1.12 wave):
   -/+ pair instead of silently changing meaning — with the
   summary note and full map as the large-change fallback.
   Heal events carry the same change note for their step.
+- **Effect feedback (v1.13 wave).** The rendered element map
+  now carries each field's LIVE value: ` value="…"` (whitespace
+  collapsed, truncated past 60 chars) for text-like inputs,
+  textareas, and selects — a select shows its selected option's
+  text — plus a bare ` checked` marker for ticked checkboxes and
+  radios. Chromium perception reads the live DOM `value`
+  property inside the existing single evaluate; the fake body
+  overlays its field store at perceive time. This closes the
+  loop the shifting-page-heal eval exposed: the heal landed the
+  typing, but on a page that shows no visible change after Save
+  the decider saw an identical map, re-verified, and flailed
+  into the stuck stop. Now the effect is in the map — and
+  because the map signature hashes the render, the stuck
+  detector sees the change too. A password input's content is
+  NEVER rendered and is redacted at the source in every body
+  (HTML parser, fake overlay, the in-page descriptor walk,
+  which also no longer names a password field by its value), so
+  it cannot reach a model, a descriptor, or a trail through
+  perception. `value` and `checked` are effect signals, not
+  identity: both stay out of heal matching, so a heal still
+  re-resolves a field whose value changed since perception.
+  Sensitive values are masked at ingestion under the same
+  discipline: a card number (13–19 digits, Luhn-checked), an
+  SSN-shaped value, a field whose autocomplete carries a `cc-`
+  token or `one-time-code`, a field whose name, id, placeholder,
+  or label reads as a card / CVV / routing / IBAN / tax-id /
+  OTP / token / API-key / secret field, and a long high-entropy
+  token-shaped value enter the element only as
+  `[masked · N chars]` — presence and length, never content,
+  following the phone approver's redaction standard — so the
+  raw string reaches no render, descriptor, or trail through
+  perception in any body (HTML parser, fake overlay, Chromium
+  DOM and AX perception). Ordinary working data (names,
+  emails, addresses, note text) still renders in full, a bare
+  short number is never masked by shape alone, and a masked
+  value's length change still moves the map signature. An
+  explicit `extract` action still reads the live page —
+  extraction is an operator-intended read, and masking governs
+  perception, not extraction. The policy is one knob,
+  GHOST_HANDS_FIELD_VALUES: `masked` (default), `full` (raw
+  values; passwords still never), or `off` (no field values
+  stored at all, restoring pre-v1.13 perception).
 
 ## [1.11.0] — November 12, 2026
 
