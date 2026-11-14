@@ -7,6 +7,7 @@ what the trail records, so one perception serves all three.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import re
 from dataclasses import dataclass, field
@@ -81,6 +82,18 @@ class Element:
     label: Optional[str] = None
     frame: Optional[str] = None
     backend_id: Optional[int] = None
+    # v1.12 (P0-1): multi-signal identity for pre-action revalidation
+    # and containment-checked healing. ``text`` is the element's visible
+    # text (distinct from ``name``, which may come from aria-label or a
+    # placeholder); ``box`` is the perception-time bounding box
+    # {"x","y","w","h"} in viewport coordinates (Chromium bodies fill
+    # it; fake/sim bodies leave it None); ``nth`` is the element's
+    # 1-based ordinal among the map's elements sharing its (role, name),
+    # assigned when the map is built — a tiebreak signal when several
+    # elements share a name.
+    text: Optional[str] = None
+    box: Optional[dict] = None
+    nth: Optional[int] = None
     # v0.5: an opaque body-native target reference (the Android bridge's
     # child-index path, e.g. "0/2/1"). Bodies that resolve targets by
     # their own addressing fill this in; web bodies leave it None. It is
@@ -90,6 +103,22 @@ class Element:
     def key(self) -> tuple:
         """Identity used for self-healing matches: tag + role + name."""
         return (self.tag, self.role, self.name)
+
+    def identity(self) -> dict[str, Any]:
+        """v1.12 (P0-1): every identity signal recorded for this element,
+        as a plain dict — the shape ``find_heal_candidate`` checks a
+        descriptor against. Signals that were not captured are absent,
+        and absent signals never disqualify a candidate."""
+        out: dict[str, Any] = {
+            "tag": self.tag,
+            "role": self.role,
+            "name": self.name,
+        }
+        for key in ("text", "nth", "id", "href", "attr_name", "type", "label", "frame"):
+            val = getattr(self, key)
+            if val is not None:
+                out[key] = val
+        return out
 
     def descriptor(self) -> dict[str, Any]:
         """The subset recorded in the trail so a run can be replayed."""
@@ -110,6 +139,9 @@ class Element:
             "frame",
             "backend_id",
             "body_ref",
+            "text",
+            "box",
+            "nth",
         ):
             val = getattr(self, key)
             if val is not None:
@@ -140,6 +172,9 @@ class Element:
             frame=data.get("frame"),
             backend_id=data.get("backend_id"),
             body_ref=data.get("body_ref"),
+            text=data.get("text"),
+            box=data.get("box") if isinstance(data.get("box"), dict) else None,
+            nth=data.get("nth"),
         )
 
 
@@ -266,9 +301,22 @@ class _MapParser(HTMLParser):
                     el = entry["element"]
                     if el is not None:
                         text = " ".join("".join(entry["text"]).split())
+                        el.text = text or None  # v1.12: visible-text signal
                         self._finish_name(el, text)
                     self._apply_label(entry)
                 break
+
+
+def _assign_nth(elements: list[Element]) -> None:
+    """v1.12 (P0-1): stamp each element with its 1-based ordinal among
+    the elements sharing its (role, name), in document order. Two
+    "Delete" buttons become nth 1 and nth 2 — the tiebreak that lets a
+    heal tell them apart when a page re-renders."""
+    seen: dict[tuple, int] = {}
+    for el in elements:
+        group = (el.role, el.name)
+        seen[group] = seen.get(group, 0) + 1
+        el.nth = seen[group]
 
 
 @dataclass
@@ -289,8 +337,10 @@ class ElementMap:
             el = entry["element"]
             if el is not None and not el.name:
                 text = " ".join("".join(entry["text"]).split())
+                el.text = text or None  # v1.12: visible-text signal
                 _MapParser._finish_name(el, text)
             parser._apply_label(entry)
+        _assign_nth(parser.elements)
         # resolve <label for="id"> associations
         for el in parser.elements:
             if el.id and el.label is None and el.id in parser.labels_by_for:
@@ -310,6 +360,7 @@ class ElementMap:
     ) -> "ElementMap":
         """Accept a driver-supplied, pre-parsed element list."""
         els = [Element.from_dict(d, number=i + 1) for i, d in enumerate(items)]
+        _assign_nth(els)
         source_hash = hashlib.sha256(repr(items).encode()).hexdigest()[:16]
         return cls(elements=els, url=url, budget=budget, source_hash=source_hash)
 
@@ -378,6 +429,84 @@ class ElementMap:
             if el.key() == wanted:
                 return el
         return None
+
+    def find_heal_candidate(self, descriptor: dict[str, Any]) -> Optional[Element]:
+        """v1.12 (P0-1): the containment-checked heal lookup. Stricter
+        than :meth:`find_by_descriptor` on purpose — a heal moves an
+        *approved* action onto a new element, so a wrong match is worse
+        than no match:
+
+        - the descriptor's element must have lived in the main document:
+          an element inside a frame (``frame`` set) NEVER heals, and
+          candidates inside frames are never eligible;
+        - a candidate must match every identity signal the descriptor
+          recorded: tag + role + name, plus id / href / attr_name /
+          visible text whenever the descriptor carries them (absent
+          signals, e.g. on pre-v1.12 descriptors, never disqualify);
+        - every element in a map is interactive by construction, so a
+          text match is always an interactive element;
+        - ambiguity is refused: with several matching candidates, only
+          an exact ``nth`` tiebreak singles one out — otherwise None,
+          and the run fails honestly instead of clicking a guess."""
+        if descriptor.get("frame"):
+            return None
+        wanted = (
+            descriptor.get("tag", ""),
+            descriptor.get("role", ""),
+            descriptor.get("name", ""),
+        )
+        matches: list[Element] = []
+        for el in self.elements:
+            if el.frame:
+                continue
+            if el.key() != wanted:
+                continue
+            if descriptor.get("id") and el.id != descriptor["id"]:
+                continue
+            if descriptor.get("href") and el.href != descriptor["href"]:
+                continue
+            if descriptor.get("attr_name") and el.attr_name != descriptor["attr_name"]:
+                continue
+            dtext = descriptor.get("text")
+            if dtext and el.text and el.text != dtext:
+                continue
+            matches.append(el)
+        if not matches:
+            return None
+        if len(matches) == 1:
+            return matches[0]
+        nth = descriptor.get("nth")
+        if nth is not None:
+            exact = [el for el in matches if el.nth == nth]
+            if len(exact) == 1:
+                return exact[0]
+        return None
+
+    def map_diff(self, previous: Optional["ElementMap"], max_changed: int = 10) -> Optional[str]:
+        """v1.12 (P0-3): a line-level diff (difflib) of the rendered map
+        against the previous step's map — "- [3] ..." / "+ [3] ..."
+        lines — returned only when the change is small enough to be
+        more useful than the summary note (at most ``max_changed``
+        changed lines). A moved or renumbered element shows up as an
+        explicit -/+ pair instead of silently changing meaning. None
+        when nothing changed or the change is large; the caller then
+        falls back to :meth:`diff_note` and the full map."""
+        if previous is None:
+            return None
+        old = previous.render(budget=100_000).splitlines()
+        new = self.render(budget=100_000).splitlines()
+        if old == new:
+            return None
+        matcher = difflib.SequenceMatcher(a=old, b=new, autojunk=False)
+        out: list[str] = []
+        for tag, i1, i2, j1, j2 in matcher.get_opcodes():
+            if tag == "equal":
+                continue
+            out.extend(f"- {line}" for line in old[i1:i2])
+            out.extend(f"+ {line}" for line in new[j1:j2])
+        if not out or len(out) > max_changed:
+            return None
+        return "\n".join(out)
 
     def render(self, budget: Optional[int] = None) -> str:
         limit = self.budget if budget is None else budget

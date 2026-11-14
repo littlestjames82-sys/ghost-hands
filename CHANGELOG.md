@@ -6,6 +6,55 @@ All notable changes to Ghost Hands. Versions follow the releases on
 Every number below was measured on the build it describes — see the
 README's "Honest status" for what remains unproven at each step.
 
+## [Unreleased]
+
+The revalidation release (v1.12 wave):
+
+- **Pre-action revalidation + identity heal (P0-1).** The
+  Chromium driver no longer trusts perception-time geometry
+  at dispatch: ONE atomic in-page check (`__ghRevalidate`)
+  confirms the target node is still connected, visible, not
+  occluded, and still the element the decider saw (tag +
+  name), with AX eyes revalidating by backend node id. The
+  SAME node merely moved proceeds silently with recomputed
+  geometry — no model call, no Runner round-trip — and the
+  Runner records it as a `heal` trail event with
+  `kind="revalidate"` and before/after boxes. A node that
+  is gone raises the new distinct `StaleTargetError`.
+  Perception now records multi-signal identity per element:
+  backendNodeId, role, name, `nth` among same-named
+  elements, visible text, stable attributes, and the
+  bounding box. Runner healing re-resolves through the new
+  containment-checked lookup (`find_heal_candidate`): every
+  recorded signal must match, elements inside frames never
+  heal, and ambiguity is a refusal, not a guess. The fake
+  body learned the same lesson: two same-named elements are
+  no longer interchangeable when their ids or hrefs differ.
+- **Never-heal rule (P0-1, governance).** An action bearing
+  a secret placeholder, or an upload (`set_file`), is never
+  re-resolved to a different element — its approval was
+  bound to the element identity the approver saw. Identity
+  loss on such an action stops the run with the new
+  `UnhealableTargetError` and a `kind="refused"` heal event,
+  so the action can be re-approved against a fresh
+  perception. Same-node geometry recompute is unaffected.
+- **Wait-for-quiet (P0-2).** Before perceiving and before
+  acting, the Runner asks the Chromium driver to let the
+  page settle: no DOM mutation (an injected MutationObserver
+  stamp) and no in-flight network request for 500 ms, hard
+  cap 5 s. On cap expiry the run proceeds anyway and the
+  trail and the decider carry a "possibly mid-transition"
+  note. Disable per-run with `Runner(quiet_wait=False)` or
+  globally with `GHOST_HANDS_QUIET=0`; a no-op on fake/sim
+  drivers.
+- **Snapshot-diff change notes (P0-3).** When a page change
+  is small, the decider now also gets a line-level difflib
+  diff of the rendered element map under the v1.4 summary
+  note — a moved or renumbered element reads as an explicit
+  -/+ pair instead of silently changing meaning — with the
+  summary note and full map as the large-change fallback.
+  Heal events carry the same change note for their step.
+
 ## [1.11.0] — November 12, 2026
 
 The honest-ruler release (v1.11 wave):

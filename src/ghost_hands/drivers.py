@@ -54,7 +54,7 @@ from typing import Callable, Optional, Protocol
 from urllib.parse import urljoin, urlparse
 
 from .actions import Action
-from .errors import HandsError
+from .errors import HandsError, StaleTargetError
 from .eyes import Element, ElementMap, extract_links, extract_table
 
 
@@ -262,6 +262,24 @@ class FakeDriver:
             raise HandsError(
                 f"target mismatch: [{element.number}] was <{element.tag}> "
                 f'"{element.name}", now <{current.tag}> "{current.name}"'
+            )
+        # v1.12 (P0-1): the key check alone cannot tell two same-named
+        # elements apart (two "Delete" buttons are one key). When both
+        # the perceived element and the node now at its number carry a
+        # stable id or href and they differ, the target moved — say so,
+        # so the heal re-resolves by identity instead of silently
+        # acting on the wrong twin.
+        if element.id and current.id and current.id != element.id:
+            raise HandsError(
+                f"target mismatch: [{element.number}] was "
+                f'<{element.tag}> "{element.name}" (id={element.id}), '
+                f'now <{current.tag}> "{current.name}" (id={current.id})'
+            )
+        if element.href and current.href and current.href != element.href:
+            raise HandsError(
+                f"target mismatch: [{element.number}] was "
+                f'<{element.tag}> "{element.name}" (href={element.href}), '
+                f'now <{current.tag}> "{current.name}" (href={current.href})'
             )
 
     def _store_field(self, element: Element, value: str) -> None:
@@ -972,13 +990,64 @@ function __ghDescribe(el, frameName) {
     placeholder: attrs['placeholder'] || null,
     value: (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT') ? String(el.value) : (attrs['value'] || null),
     form_action: form ? form.getAttribute('action') : null,
-    label: __ghLabel(el), frame: frameName
+    label: __ghLabel(el), frame: frameName,
+    text: __ghText(el) || null
   };
 }
 function __ghDescriptors() {
   const out = [];
-  __ghWalk(document, null, 0, 0, (el, fr) => { if (__ghVisible(el)) out.push(__ghDescribe(el, fr)); });
+  __ghWalk(document, null, 0, 0, (el, fr, ox, oy) => {
+    if (__ghVisible(el)) {
+      const d = __ghDescribe(el, fr);
+      const r = el.getBoundingClientRect();
+      d.box = {x: ox + r.x, y: oy + r.y, w: r.width, h: r.height};
+      out.push(d);
+    }
+  });
   return out;
+}
+function __ghRevalidate(idx) {
+  // v1.12 (P0-1): ONE atomic revalidation of the perceived target at
+  // dispatch time — same walk, same order as __ghCollect, so index idx
+  // is the node the decider saw. Reports whether that node is still
+  // connected, visible (non-zero box), and unobstructed at its center,
+  // with its CURRENT box so the caller can tell "same node, moved"
+  // apart from "node gone / replaced".
+  const els = __ghCollect();
+  const el = els[idx];
+  if (!el) return {status: 'gone'};
+  let box = null;
+  __ghWalk(document, null, 0, 0, (e2, fr, ox, oy) => {
+    if (e2 === el) {
+      const rr = e2.getBoundingClientRect();
+      box = {x: ox + rr.x, y: oy + rr.y, w: rr.width, h: rr.height, frame: fr};
+    }
+  });
+  if (!box || !el.isConnected) return {status: 'gone', box: box};
+  if (box.w <= 0 || box.h <= 0) return {status: 'hidden', box: box};
+  const cx = box.x + box.w / 2, cy = box.y + box.h / 2;
+  let occluded = false;
+  try {
+    let top = document.elementFromPoint(cx, cy);
+    // Inside a same-origin iframe, the topmost top-document element
+    // at the point is the iframe itself — that is not an occlusion.
+    const framed = top && top.tagName === 'IFRAME' && top.contentDocument && el.ownerDocument === top.contentDocument;
+    if (!framed) {
+      // Descend open shadow roots: elementFromPoint stops at the
+      // shadow HOST, which would read every shadow-DOM target as
+      // covered by its own host. Each level's elementFromPoint takes
+      // the same viewport coordinates.
+      let guard = 0;
+      while (top && top.shadowRoot && guard++ < 8) {
+        const inner = top.shadowRoot.elementFromPoint(cx, cy);
+        if (!inner || inner === top) break;
+        top = inner;
+      }
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) occluded = true;
+    }
+  } catch (e) {}
+  const d = __ghDescribe(el, box.frame);
+  return {status: occluded ? 'occluded' : 'ok', box: box, tag: d.tag, name: d.name, frame: box.frame};
 }
 function __ghCoords() {
   const out = [];
@@ -1173,6 +1242,20 @@ def _check_navigable(url: str) -> None:
         )
 
 
+# v1.12 (P0-2): the wait-for-quiet page hook. Installed on every new
+# document (Page.addScriptToEvaluateOnNewDocument) and stamped with
+# performance.now() on every DOM mutation; the driver polls the stamp
+# plus its own CDP Network pending set to know when the page has
+# settled. Purely observational — it changes nothing on the page.
+_QUIET_JS = r"""
+try {
+  window.__ghLastMutation = performance.now();
+  new MutationObserver(function () { window.__ghLastMutation = performance.now(); })
+    .observe(document, {subtree: true, childList: true, attributes: true, characterData: true});
+} catch (e) {}
+"""
+
+
 class ChromiumDriver:
     """A real Chromium driven by our own CDP client. Stdlib only.
 
@@ -1230,6 +1313,15 @@ class ChromiumDriver:
         self._downloads_configured = False
         self._viewport_preset = viewport
         self.event_sink: Optional[Callable[[str, dict], None]] = None
+        # v1.12 (P0-1/P0-2): the last pre-action revalidation outcome
+        # ({"moved", "from_box", "to_box", "number"}) for the Runner to
+        # record, and the wait-for-quiet state (window/cap + last cap
+        # note). Both are plain attributes so non-Runner callers and
+        # tests can read them without a trail.
+        self.last_revalidation: Optional[dict] = None
+        self.last_quiet_note: Optional[str] = None
+        self.quiet_window = 0.5
+        self.quiet_cap = 5.0
         self.network_log: list[dict] = []
         self.net_truncated = False
         self._net_pending: dict[str, dict] = {}
@@ -1329,6 +1421,17 @@ class ChromiumDriver:
         self._session = attached["sessionId"]
         self._client.send("Page.enable", {}, session_id=self._session)
         self._client.send("Runtime.enable", {}, session_id=self._session)
+        # v1.12 (P0-2): stamp DOM mutations on every future document
+        # for wait-for-quiet; also install on the current document.
+        try:
+            self._client.send(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": _QUIET_JS},
+                session_id=self._session,
+            )
+            self._eval(_QUIET_JS)
+        except HandsError:
+            pass  # quiet is an optimization; never block a launch on it
         # v0.3: Network capture for every session; DOM for file inputs.
         self._client.send("Network.enable", {}, session_id=self._session)
         self._client.send("DOM.enable", {}, session_id=self._session)
@@ -1415,6 +1518,49 @@ class ChromiumDriver:
                 return
             time.sleep(0.05)
 
+    def wait_for_quiet(self) -> bool:
+        """v1.12 (P0-2): wait until the page settles — no DOM mutation
+        and no in-flight network request for ``quiet_window`` seconds —
+        bounded by ``quiet_cap``. Returns True when quiet was reached.
+        On cap expiry it returns False, sets ``last_quiet_note`` to a
+        "possibly mid-transition" note, and the caller proceeds anyway:
+        a busy page is a fact to record, not a reason to hang. Long-
+        lived EventSource/WebSocket requests never count as in-flight
+        (they would pin the page busy forever). Disabled outright by
+        GHOST_HANDS_QUIET=0; any evaluation failure also reads as quiet,
+        so this can never block a run by itself."""
+        if os.environ.get("GHOST_HANDS_QUIET") == "0":
+            self.last_quiet_note = None
+            return True
+        deadline = time.time() + self.quiet_cap
+        while True:
+            try:
+                reading = self._eval(
+                    "[window.__ghLastMutation || 0, performance.now()]"
+                )
+            except Exception:
+                self.last_quiet_note = None
+                return True
+            last_mut, now_ms = 0.0, 0.0
+            if isinstance(reading, (list, tuple)) and len(reading) == 2:
+                last_mut, now_ms = float(reading[0]), float(reading[1])
+            pending = sum(
+                1
+                for entry in self._net_pending.values()
+                if entry.get("type") not in ("WebSocket", "EventSource")
+            )
+            if (now_ms - last_mut) >= self.quiet_window * 1000 and pending == 0:
+                self.last_quiet_note = None
+                return True
+            if time.time() >= deadline:
+                self.last_quiet_note = (
+                    "possibly mid-transition: page did not go quiet "
+                    f"within {self.quiet_cap:g}s (DOM mutations or "
+                    "network still active)"
+                )
+                return False
+            time.sleep(0.05)
+
     def _handles(self) -> list[dict]:
         return self._eval(_HANDLES_JS) or []
 
@@ -1485,6 +1631,118 @@ class ChromiumDriver:
                 f"target mismatch: [{element.number}] was <{element.tag}> "
                 f'"{element.name}", page now has <{actual_tag}> there'
             )
+
+    def _note_revalidation(self, element: Element, box: dict) -> None:
+        """Compare the target's live box against its perception-time
+        box and remember the outcome for the Runner: same node, merely
+        moved (or not moved at all). Centers/sizes are compared with a
+        2px tolerance so sub-pixel layout jitter stays silent."""
+        from_box = element.box
+        moved = False
+        if from_box:
+            try:
+                dx = abs((box["x"] + box["w"] / 2) - (from_box["x"] + from_box["w"] / 2))
+                dy = abs((box["y"] + box["h"] / 2) - (from_box["y"] + from_box["h"] / 2))
+                dw = abs(box["w"] - from_box["w"])
+                dh = abs(box["h"] - from_box["h"])
+                moved = max(dx, dy, dw, dh) > 2
+            except (KeyError, TypeError):
+                moved = False
+        self.last_revalidation = {
+            "moved": moved,
+            "from_box": from_box,
+            "to_box": {k: box.get(k) for k in ("x", "y", "w", "h")},
+            "number": element.number,
+        }
+
+    def _revalidate_target(self, element: Element) -> dict:
+        """v1.12 (P0-1): pre-action revalidation — the dispatch-time
+        replacement for the _resolve + _check_fresh pair on targeted
+        actions. Polls (within the auto-wait budget) for ONE atomic
+        in-page check: the perceived node still connected, visible, not
+        occluded, and still the element the decider saw (tag + name).
+        A node that merely *moved* passes silently with fresh geometry
+        (recorded on ``last_revalidation`` — no model call, no Runner
+        round-trip). A node that is gone raises StaleTargetError; a
+        node replaced by a different element, or covered by another,
+        raises a "target mismatch" HandsError. Both are the signals the
+        Runner's heal path already understands."""
+        if element.backend_id is not None:
+            return self._revalidate_ax(element)
+        deadline = time.time() + self.auto_wait
+        last_status: Optional[str] = None
+        last_info: dict = {}
+        while True:
+            info = self._gh_eval(
+                f"return __ghRevalidate({element.number - 1});"
+            ) or {}
+            status = info.get("status")
+            if status == "ok":
+                tag_ok = not info.get("tag") or not element.tag or info["tag"] == element.tag
+                name_ok = (
+                    not info.get("name")
+                    or not element.name
+                    or info["name"] == element.name
+                )
+                if tag_ok and name_ok:
+                    box = info["box"]
+                    self._note_revalidation(element, box)
+                    return {
+                        "x": box["x"] + box["w"] / 2,
+                        "y": box["y"] + box["h"] / 2,
+                        "w": box["w"],
+                        "h": box["h"],
+                    }
+                status = "mismatch"
+            last_status = status
+            last_info = info
+            if time.time() >= deadline:
+                break
+            time.sleep(0.1)
+        if last_status in ("gone", "hidden"):
+            raise StaleTargetError(
+                f"target missing (stale): [{element.number}] "
+                f'<{element.tag}> "{element.name}" is no longer on the '
+                "page (pre-action revalidation)"
+            )
+        if last_status == "occluded":
+            raise HandsError(
+                f"target mismatch: [{element.number}] "
+                f'<{element.tag}> "{element.name}" is covered by another '
+                "element at its center (pre-action revalidation)"
+            )
+        raise HandsError(
+            f"target mismatch: [{element.number}] was <{element.tag}> "
+            f'"{element.name}", page now has '
+            f"<{last_info.get('tag')}> \"{last_info.get('name')}\" there "
+            "(pre-action revalidation)"
+        )
+
+    def _revalidate_ax(self, element: Element) -> dict:
+        """AX-eyes revalidation: identity IS the backend node id, so
+        revalidation is a liveness + box check through DOM.getBoxModel
+        (the same resolution _resolve used). A node that no longer
+        resolves is stale; a moved node passes with fresh geometry."""
+        deadline = time.time() + self.auto_wait
+        while True:
+            center = self._ax_center(element)
+            if center is not None:
+                box = {
+                    "x": center["x"] - center["w"] / 2,
+                    "y": center["y"] - center["h"] / 2,
+                    "w": center["w"],
+                    "h": center["h"],
+                }
+                self._note_revalidation(element, box)
+                return center
+            if time.time() >= deadline:
+                break
+            time.sleep(0.1)
+        raise StaleTargetError(
+            f"target missing (stale): [{element.number}] "
+            f'<{element.tag}> "{element.name}" no longer resolves to a '
+            "live node (pre-action revalidation)"
+        )
 
     def _element_js(self, element: Element, body: str) -> str:
         """JS acting on the live element at the perceived number, through
@@ -1736,6 +1994,19 @@ class ChromiumDriver:
             )
         url = self.current_url()
         element_map = ElementMap.from_elements(items, url=url)
+        # v1.12 (P0-1): perception-time boxes for AX elements too, via
+        # the same getBoxModel resolution actions use (best-effort: a
+        # node that will not resolve simply carries no box).
+        for el in element_map.elements:
+            if el.backend_id is not None:
+                center = self._ax_center(el)
+                if center is not None:
+                    el.box = {
+                        "x": center["x"] - center["w"] / 2,
+                        "y": center["y"] - center["h"] / 2,
+                        "w": center["w"],
+                        "h": center["h"],
+                    }
         try:
             element_map.title = self._eval("document.title") or ""
         except HandsError:
@@ -2012,6 +2283,7 @@ class ChromiumDriver:
     # -- actions --------------------------------------------------------------
     def act(self, action: Action, element: Optional[Element]) -> str:
         self._launch()
+        self.last_revalidation = None  # v1.12: fresh outcome per dispatch
         kind = action.kind
         if kind == "navigate":
             self.open(action.url or "about:blank")
@@ -2068,13 +2340,12 @@ class ChromiumDriver:
 
         if element is None:
             raise HandsError(f"{kind} requires a target element")
-        handle = self._resolve(element)
-        if handle is None:
-            raise HandsError(
-                f"target missing: [{element.number}] \"{element.name}\" did "
-                f"not appear within {self.auto_wait}s (auto-wait)"
-            )
-        self._check_fresh(element)
+        # v1.12 (P0-1): one atomic pre-action revalidation replaces the
+        # resolve + freshness pair — same node (moved or not) proceeds
+        # with live geometry; gone/replaced raises the healable stale /
+        # mismatch signals. (_act_download keeps the older pair: it
+        # resolves its own target on its own path.)
+        handle = self._revalidate_target(element)
         x, y = handle["x"], handle["y"]
 
         if kind == "click":

@@ -108,7 +108,7 @@ from .deciders import (
 )
 from .doctor import Check, run_doctor
 from .drivers import ChromiumDriver, FakeDriver
-from .errors import HandsError
+from .errors import HandsError, StaleTargetError, UnhealableTargetError
 from .export import export_ghost_hands_script
 from .eyes import Element, ElementMap
 from .ghostguard import GhostGuardBridgeError, GhostGuardGovernor, governor_from_env
@@ -137,6 +137,8 @@ __all__ = [
     "GhostGuardGovernor",
     "Governor",
     "HandsError",
+    "StaleTargetError",
+    "UnhealableTargetError",
     "ObservingDecider",
     "AnthropicDecider",
     "FallbackDecider",

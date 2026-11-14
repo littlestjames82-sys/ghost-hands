@@ -28,6 +28,18 @@ continues — the decider picks a different approach on a fresh perception.
 Governance denials, approval refusals, and budget stops never recover:
 they are decisions and limits, not accidents.
 
+Revalidation (v1.12, P0): the Chromium driver revalidates its target
+atomically at dispatch — the same node merely moved proceeds silently
+with fresh geometry and is recorded as a ``heal`` event with
+``kind="revalidate"``; only a lost node reaches the heal chain, which
+now re-resolves under containment (every recorded identity signal must
+match; framed elements never heal). Actions bearing secret placeholders
+and uploads never heal at all: identity loss stops the run with
+``UnhealableTargetError`` so the action can be re-approved. Before
+perceiving and before acting, the Runner also waits for page quiet
+(bounded; a capped wait is noted, never fatal) when the driver offers
+it and ``quiet_wait`` is on.
+
 Honest stop reasons: done / budget / denied / stuck / error. Stuck means
 the same (action, target) three times, or an unchanged element map for
 three consecutive steps.
@@ -45,6 +57,7 @@ result events as parsed ``data``.
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Optional
@@ -53,7 +66,7 @@ from .actions import Action
 from .cache import PlanCache
 from .drivers import Driver
 from .deciders import Decider
-from .errors import HandsError
+from .errors import HandsError, UnhealableTargetError
 from .eyes import ElementMap
 from .governor import ASK, Decision, Governor, Policy
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
@@ -132,6 +145,7 @@ class Runner:
         parent_trail_hash: Optional[str] = None,
         heal_attempts: int = 2,
         error_recovery_attempts: int = 1,
+        quiet_wait: bool = True,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -168,6 +182,11 @@ class Runner:
         # before). Negative values clamp to 0 rather than surprising.
         self.heal_attempts = max(0, heal_attempts)
         self.error_recovery_attempts = max(0, error_recovery_attempts)
+        # v1.12 (P0-2): wait-for-quiet before perceiving and before
+        # acting, when the driver offers it (ChromiumDriver). False
+        # disables; GHOST_HANDS_QUIET=0 disables regardless. Drivers
+        # without the hook (fake/sim) make this a no-op.
+        self.quiet_wait = quiet_wait
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -187,6 +206,30 @@ class Runner:
         html = self.driver.snapshot_html()
         url = self.driver.current_url()
         return ElementMap.from_html(html, url=url)
+
+    def _quiet_wait(self) -> Optional[str]:
+        """v1.12 (P0-2): ask the driver to let the page settle. Returns
+        the driver's "possibly mid-transition" note when its quiet cap
+        expired (the caller records it and proceeds anyway), else None.
+        No-op when disabled here, disabled by GHOST_HANDS_QUIET=0, or
+        when the driver has no quiet hook."""
+        if not self.quiet_wait:
+            return None
+        if os.environ.get("GHOST_HANDS_QUIET") == "0":
+            return None
+        wait = getattr(self.driver, "wait_for_quiet", None)
+        if not callable(wait):
+            return None
+        try:
+            quiet = wait()
+        except Exception:
+            return None
+        if quiet:
+            return None
+        return (
+            getattr(self.driver, "last_quiet_note", None)
+            or "possibly mid-transition: page did not go quiet in time"
+        )
 
     def _driver_event(self, event_type: str, fields: dict[str, Any]) -> None:
         """The sink wired into drivers: their asynchronous events land
@@ -305,6 +348,9 @@ class Runner:
         for step in range(1, self.step_budget + 1):
             self._current_step = step
             # -- perceive ---------------------------------------------------
+            # v1.12 (P0-2): let the page settle first; a capped wait is
+            # recorded on the perceive event and perception proceeds.
+            quiet_note = self._quiet_wait()
             try:
                 element_map = self._perceive_map()
                 url = element_map.url or self.driver.current_url()
@@ -321,6 +367,7 @@ class Runner:
                 elements=len(element_map),
                 map_chars=len(rendered),
                 signature=element_map.signature(),
+                **({"quiet_note": quiet_note} if quiet_note else {}),
                 **({"goal": goal} if step == 1 and goal else {}),
                 **(
                     {"parent_hash": self.parent_trail_hash}
@@ -378,8 +425,13 @@ class Runner:
                     candidate = None  # a cached plan never claims done
                 if candidate is not None and candidate.target is not None:
                     descriptor = planned.get("descriptor")
+                    # v1.12 (P0-1): replay re-resolution is containment-
+                    # checked too — a cached plan must not re-point onto
+                    # a same-named twin of the element it was proven on.
+                    # A target that cannot be identity-verified simply
+                    # falls back to the live decider below.
                     found = (
-                        element_map.find_by_descriptor(descriptor)
+                        element_map.find_heal_candidate(descriptor)
                         if descriptor
                         else element_map.get(candidate.target)
                     )
@@ -419,10 +471,28 @@ class Runner:
                 # v1.4: tell the decider what changed since the last
                 # step (navigation, elements appeared/gone) so it can
                 # orient on the delta instead of re-deriving it.
+                # v1.12 (P0-3): when the change is small, attach the
+                # line-level map diff under the summary — a moved or
+                # renumbered element reads as an explicit -/+ pair.
                 note = element_map.diff_note(prev_map)
-                if note:
+                diff = element_map.map_diff(prev_map)
+                if note and diff:
+                    history.append(
+                        {
+                            "kind": "system",
+                            "note": f"Page change: {note}\nMap diff:\n{diff}",
+                        }
+                    )
+                elif note:
                     history.append(
                         {"kind": "system", "note": f"Page change: {note}"}
+                    )
+                elif diff:
+                    history.append(
+                        {
+                            "kind": "system",
+                            "note": f"Page change: map diff:\n{diff}",
+                        }
                     )
             prev_map = element_map
             if action is None and not self._batch_queue and self.max_llm_tokens:
@@ -615,6 +685,23 @@ class Runner:
             # are never re-asked. Every retry is recorded before it
             # runs and re-resolves secret placeholders at the same
             # execution boundary as the first attempt.
+            # v1.12 (P0-2): settle again before acting — the gap between
+            # perception and dispatch is where targets go stale. A
+            # capped wait is noted for the decider and on the result
+            # event; the action proceeds regardless.
+            act_quiet_note = self._quiet_wait()
+            if act_quiet_note:
+                history.append(
+                    {"kind": "system", "note": f"Page change: {act_quiet_note}"}
+                )
+            # v1.12 (P0-1) NEVER-HEAL: an action bearing a secret
+            # placeholder, or an upload, must never be re-resolved to a
+            # different element — its approval was bound to the element
+            # identity the approver saw. (Same-node geometry recompute
+            # inside the driver is unaffected: that is the same node.)
+            never_heal = action.kind == "set_file" or bool(
+                action_secret_refs(action)
+            )
             result = ""
             failure: Optional[Exception] = None
             heals_this_step = 0
@@ -623,9 +710,66 @@ class Runner:
                 try:
                     result = self.driver.act(current_exec, element)
                     failure = None
+                    # v1.12 (P0-1): a same-node revalidation inside the
+                    # driver (the element moved; the driver recomputed
+                    # and proceeded) is recorded as a heal event of kind
+                    # "revalidate" — no model call was spent on it.
+                    rev = getattr(self.driver, "last_revalidation", None)
+                    if rev is not None:
+                        try:
+                            self.driver.last_revalidation = None  # type: ignore[attr-defined]
+                        except Exception:
+                            pass
+                        if rev.get("moved"):
+                            self.trail.record(
+                                "heal",
+                                step,
+                                kind="revalidate",
+                                action=action.to_dict(),
+                                descriptor=element.descriptor()
+                                if element is not None
+                                else None,
+                                from_target=action.target,
+                                to_target=action.target,
+                                found=True,
+                                from_box=rev.get("from_box"),
+                                to_box=rev.get("to_box"),
+                                attempt=0,
+                            )
                     break
                 except Exception as exc:
                     failure = exc
+                    message = str(exc)
+                    if never_heal and (
+                        "target mismatch" in message
+                        or "target missing" in message
+                    ):
+                        # Fail loudly and distinctly: no re-resolution,
+                        # so the run stops and the action can be
+                        # re-approved against a fresh perception.
+                        self.trail.record(
+                            "heal",
+                            step,
+                            kind="refused",
+                            action=action.to_dict(),
+                            descriptor=element.descriptor()
+                            if element is not None
+                            else None,
+                            from_target=action.target,
+                            to_target=None,
+                            found=False,
+                            trigger=message[:200],
+                            attempt=heals_this_step + 1,
+                        )
+                        failure = UnhealableTargetError(
+                            "target unhealable: "
+                            f"{action.kind} on [{action.target}] carries "
+                            "a secret or an upload bound to the element "
+                            f"the approver saw; its identity was lost "
+                            f"({message}); the run stops so the action "
+                            "can be re-approved"
+                        )
+                        break
                     if heals_this_step >= self.heal_attempts:
                         break
                     healed = self._attempt_heal(
@@ -634,6 +778,7 @@ class Runner:
                         element,
                         exc,
                         attempt=heals_this_step + 1,
+                        current_map=element_map,
                     )
                     if healed is None:
                         break
@@ -680,6 +825,8 @@ class Runner:
                 # smuggle it into the trail or the next prompt.
                 result = scrub_text(result, secret_values)
             result_fields: dict[str, Any] = {}
+            if act_quiet_note:
+                result_fields["quiet_note"] = act_quiet_note
             if action.kind == "extract":
                 # Structured extracts land in the record as parsed data,
                 # not just an opaque string.
@@ -741,13 +888,22 @@ class Runner:
         element,
         exc: Exception,
         attempt: int = 1,
+        current_map: Optional[ElementMap] = None,
     ):
         """One self-healing retry: re-perceive, re-find the target by its
         recorded descriptor, and return (action, element) re-pointed at
         the new number — or None when healing does not apply or the
         element is genuinely gone. Always records a ``heal`` event when
         it applies; ``attempt`` is the chain position (v1.10) and lands
-        on the event so a multi-heal step reads in order."""
+        on the event so a multi-heal step reads in order.
+
+        v1.12 (P0-1): the re-find goes through the containment-checked
+        lookup (``find_heal_candidate``) — every recorded identity
+        signal must match, framed elements never heal, and ambiguity is
+        a refusal, not a guess. The heal event (kind "reresolve")
+        carries the page-change note against the step's own map when
+        one is computable, so a moved target reads as an explicit
+        change in the record, not silent renumbering."""
         if action.target is None or element is None:
             return None
         message = str(exc)
@@ -755,14 +911,22 @@ class Runner:
             return None
         descriptor = element.descriptor()
         found = None
+        fresh_map = None
+        quiet_note = self._quiet_wait()
         try:
             fresh_map = self._perceive_map()
-            found = fresh_map.find_by_descriptor(descriptor)
+            found = fresh_map.find_heal_candidate(descriptor)
         except Exception:
             found = None
+        change_note = None
+        if fresh_map is not None and current_map is not None:
+            change_note = fresh_map.map_diff(current_map) or fresh_map.diff_note(
+                current_map
+            )
         self.trail.record(
             "heal",
             step,
+            kind="reresolve",
             action=action.to_dict(),
             descriptor=descriptor,
             from_target=action.target,
@@ -770,6 +934,8 @@ class Runner:
             found=found is not None,
             trigger=message[:200],
             attempt=attempt,
+            **({"change_note": change_note} if change_note else {}),
+            **({"quiet_note": quiet_note} if quiet_note else {}),
         )
         if found is None:
             return None

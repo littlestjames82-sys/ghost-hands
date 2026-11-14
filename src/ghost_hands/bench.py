@@ -44,7 +44,7 @@ from .drivers import (
     encode_cdp_message,
     find_chrome,
 )
-from .errors import HandsError
+from .errors import HandsError, StaleTargetError
 from .export import export_ghost_hands_script
 from .eyes import ElementMap
 from .governor import Governor, Policy, classify
@@ -3347,6 +3347,145 @@ def case_v12_require_verify_gate():
     assert report.summary == "proven"
 
 
+# ---------------------------------------------------------------------------
+# v1.12 cases — P0-1: revalidation + identity heal, never-heal rule
+# ---------------------------------------------------------------------------
+
+_V112_TWINS = """<!doctype html><html><head><title>Twins</title></head>
+<body>
+<button id="del-a" data-nav="{base}/deleted-a">Delete</button>
+<button id="del-b" data-nav="{base}/deleted-b">Delete</button>
+</body></html>"""
+
+_V112_TWINS_SWAPPED = """<!doctype html><html><head><title>Twins</title></head>
+<body>
+<button id="del-b" data-nav="{base}/deleted-b">Delete</button>
+<button id="del-a" data-nav="{base}/deleted-a">Delete</button>
+</body></html>"""
+
+
+def case_v112_containment_heal():
+    # Two identical "Delete" buttons swap places between perception
+    # and the click. Pre-v1.12 the fake driver could not even see the
+    # swap (same tag/role/name at the target number) and clicked the
+    # WRONG twin silently. Now the id signal exposes the swap, the
+    # heal fires, and containment re-resolution (id must match) lands
+    # the click on del-b at its new number.
+    base = "https://v112.local"
+    pages = {
+        f"{base}/list": _V112_TWINS.format(base=base),
+        f"{base}/deleted-a": "<html><body><p>a</p></body></html>",
+        f"{base}/deleted-b": "<html><body><p>b</p></body></html>",
+    }
+    driver = FakeDriver(pages, start_url=f"{base}/list")
+    driver.mutate_hook = lambda d: d.pages.__setitem__(
+        f"{base}/list", _V112_TWINS_SWAPPED.format(base=base)
+    )
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(
+            [{"kind": "click", "target": 2}, {"kind": "done", "summary": "deleted b"}]
+        ),
+        approver=lambda info: True,
+        trail=trail,
+        plan_cache=PlanCache(),
+    ).run("bench v1.12 containment heal")
+    assert report.stop_reason == "done", report.summary
+    assert driver.current_url() == f"{base}/deleted-b", driver.current_url()
+    heals = [e for e in trail.events if e["type"] == "heal"]
+    assert len(heals) == 1 and heals[0]["kind"] == "reresolve", heals
+    assert heals[0]["found"] is True and heals[0]["to_target"] == 1, heals
+    return True
+
+
+def case_v112_never_heal_secret():
+    # The password field moves between perception and the type. A
+    # secret-bearing action must NEVER be re-resolved onto another
+    # element: the heal is refused, the run errors with the distinct
+    # "unhealable" stop, and the secret lands nowhere.
+    url = "https://v112.local/login"
+    v1 = (
+        "<!doctype html><html><head><title>Login</title></head><body>"
+        '<input id="user" name="user" type="text" placeholder="Username">'
+        '<input id="pass" name="pass" type="password" placeholder="Password">'
+        "</body></html>"
+    )
+    v2 = (
+        "<!doctype html><html><head><title>Login</title></head><body>"
+        '<input id="promo" name="promo" type="text" placeholder="Promo code">'
+        '<input id="user" name="user" type="text" placeholder="Username">'
+        '<input id="pass" name="pass" type="password" placeholder="Password">'
+        "</body></html>"
+    )
+    driver = FakeDriver({url: v1}, start_url=url)
+    driver.mutate_hook = lambda d: d.pages.__setitem__(url, v2)
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(
+            [
+                {"kind": "type", "target": 2, "text": "{{secret:PASSWORD}}"},
+                {"kind": "done", "summary": "logged in"},
+            ]
+        ),
+        trail=trail,
+        secrets={"PASSWORD": "bench-secret"},
+        error_recovery_attempts=0,
+        plan_cache=PlanCache(),
+    ).run("bench v1.12 never-heal")
+    assert report.stop_reason == "error", report.summary
+    assert "unhealable" in report.summary, report.summary
+    assert "bench-secret" not in driver.fields.values()
+    heals = [e for e in trail.events if e["type"] == "heal"]
+    assert len(heals) == 1 and heals[0]["kind"] == "refused", heals
+    return True
+
+
+def case_v112_revalidate_chromium():
+    # On the real Chromium body: a button that moves itself after
+    # perception is still clicked (same node — the driver recomputes
+    # geometry silently and reports the move), and a button REMOVED
+    # after perception raises the distinct stale-target error instead
+    # of clicking whatever took its place.
+    chrome = find_chrome()
+    if not chrome:
+        return (SKIP, "no Chromium binary found")
+    import time as _time
+
+    html = (
+        "<!doctype html><html><head><title>Shift</title></head><body>"
+        '<button id="mv" style="position:absolute;top:10px;left:10px" '
+        "onclick=\"document.body.setAttribute('data-clicked','yes')\">"
+        "Move me</button>"
+        "<script>setTimeout(function(){"
+        "document.getElementById('mv').style.top='220px';}, 300);</script>"
+        "</body></html>"
+    )
+    url = "data:text/html," + urllib.parse.quote(html)
+    driver = ChromiumDriver(chrome_path=chrome)
+    try:
+        driver.open(url)
+        m = driver.perceive()
+        btn = m.find_by_text("Move me")
+        assert btn is not None and btn.box is not None, m.render()
+        _time.sleep(0.7)  # the button moves to top:220px
+        driver.act(A.click(btn.number), btn)
+        note = driver.last_revalidation
+        assert note is not None and note["moved"] is True, note
+        assert "data-clicked" in driver.snapshot_html()
+        # Stale: remove the node entirely, then act on the stale map.
+        driver._eval("document.getElementById('mv').remove()")
+        try:
+            driver.act(A.click(btn.number), btn)
+            raise AssertionError("expected StaleTargetError")
+        except StaleTargetError:
+            pass
+    finally:
+        driver.close()
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -3467,6 +3606,9 @@ CASES = [
     ("v18 retry: a flaky endpoint's 500s are survived and counted", case_v18_retry_survives_flaky_endpoint),
     ("v19 http api: health, a governed run, and a verified chain over the wire", case_v19_http_api),
     ("v1.10 heal chain: an element that moves twice is followed to its third position", case_v110_heal_chain),
+    ("v1.12 containment heal: identical twins swap places; the click still lands on the right one", case_v112_containment_heal),
+    ("v1.12 never-heal: a moved password field refuses re-resolution; the secret lands nowhere", case_v112_never_heal_secret),
+    ("v1.12 revalidate: a self-moving button is clicked via live geometry; a removed one raises the stale error", case_v112_revalidate_chromium),
 ]
 
 
