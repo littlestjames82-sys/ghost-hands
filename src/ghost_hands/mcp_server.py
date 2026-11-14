@@ -69,6 +69,7 @@ from .policies import load_pack
 from .runner import Runner
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
 from .trail import Trail, verify_trail
+from .validator import validate_enabled
 from .verify import evaluate_verify
 
 from . import __version__ as _pkg_version
@@ -171,6 +172,7 @@ TOOLS = [
                 "goal": {"type": "string", "description": "A short statement of what the run is trying to achieve. Recorded in the trail as the run's purpose."},
                 "approve_all": {"type": "boolean", "description": "When true, approval-gated steps in this run are approved without asking the approver channel. Only set it when the operator has explicitly authorized the whole run."},
                 "require_verify": {"type": "boolean", "description": "When true, a 'done' step is rejected until a verify step has passed in the same run: success must be proven, not claimed."},
+                "validate": {"type": "boolean", "description": "When true, the evidence-checklist validator (v1.15) gates 'done': the goal is decomposed into checkable items, exact values are compared in code against the page and run results, unsatisfied items send the run back to work with the objections, and repeated failure stops the run as 'unverified'. GHOST_HANDS_VALIDATE=1 enables it by default."},
                 "max_llm_tokens": {"type": "integer", "description": "Goal-driven mode only: stop the run (reason 'budget') once the decider's API-reported token spend reaches this cap; checked between steps, never mid-action."},
             },
             "required": [],
@@ -590,6 +592,7 @@ def _run(session: HandsSession, args: dict) -> dict:
             start_url=start_url,
             plan_cache=cache,
             require_verify=bool(args.get("require_verify")),
+            validate=validate_enabled(bool(args.get("validate"))),
             max_llm_tokens=(
                 int(args["max_llm_tokens"])
                 if isinstance(args.get("max_llm_tokens"), int)

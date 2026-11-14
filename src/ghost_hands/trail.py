@@ -57,6 +57,14 @@ EVENT_TYPES = (
     # raised) and the run spent an error-recovery chance instead of
     # stopping. Fields: error, attempt.
     "error_recovery",
+    # v1.15: the evidence checklist a done claim is judged against,
+    # built once per run at the first done claim. Fields: items
+    # (text/exact/needle), source, degraded.
+    "checklist",
+    # v1.15: one validation verdict at a done claim. Fields: ok,
+    # attempt, items (per-item satisfied/evidence/judge_satisfied/
+    # note), objections.
+    "validation",
 )
 
 GENESIS = "genesis"

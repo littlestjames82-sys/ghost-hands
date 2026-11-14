@@ -3617,6 +3617,125 @@ def case_v114_extract_progress():
     return True
 
 
+class _ApplicationDriver(FakeDriver):
+    """Bench fixture (v1.15): the submit button always paints an
+    "Application received" banner, but the application is only
+    actually filed — issuing reference CONF-2026 — when the
+    required Full name field was filled first."""
+
+    _FORM = (
+        "<html><head><title>Apply</title></head><body>"
+        "<h1>Expense application</h1>"
+        '<form><label>Full name <input id="name" name="name" '
+        'type="text"></label>'
+        '<button type="submit">Submit application</button></form>'
+        "</body></html>"
+    )
+    _BANNER = (
+        "<html><head><title>Apply</title></head><body>"
+        "<h1>Expense application</h1>"
+        "<p>Application received. Thank you!</p>"
+        '<form><label>Full name <input id="name" name="name" '
+        'type="text"></label>'
+        '<button type="submit">Submit application</button></form>'
+        "</body></html>"
+    )
+    _CONFIRM = (
+        "<html><head><title>Confirmed</title></head><body>"
+        "<h1>Application filed</h1><p>Reference: CONF-2026</p>"
+        "</body></html>"
+    )
+
+    def __init__(self, start_url: str) -> None:
+        super().__init__({start_url: self._FORM}, start_url=start_url)
+        self.saved = False
+
+    def act(self, action, element):
+        result = super().act(action, element)
+        if action.kind == "click" and element is not None and element.type == "submit":
+            if any(str(v).strip() for v in self.fields.values()):
+                self.saved = True
+                self._overrides[self._url] = self._CONFIRM
+            else:
+                self._overrides[self._url] = self._BANNER
+        return result
+
+
+_V115_GOAL = (
+    "File the expense application and report confirmation reference CONF-2026"
+)
+_V115_URL = "https://v115.local/apply"
+
+
+def case_v115_premature_done_trap():
+    # Evidence-checklist validator (v1.15): the naive flow submits
+    # the empty form, sees the success banner, and claims done.
+    # Pre-v1.15 counting accepts that false done with nothing filed
+    # (asserted first, validation off). With the validator on, the
+    # checklist's code-checked item — the exact reference CONF-2026
+    # from the goal — is absent from the evidence, the done is
+    # rejected with the objection, the run loops back, fills the
+    # required field, submits for real, and only then validates.
+    naive = [
+        {"kind": "click", "target": 2},
+        {"kind": "done", "summary": "submitted"},
+    ]
+    off_driver = _ApplicationDriver(_V115_URL)
+    off_report = Runner(
+        off_driver,
+        ScriptedDecider(naive),
+        approver=lambda a: True,
+        trail=Trail(),
+    ).run(_V115_GOAL)
+    assert off_report.stop_reason == "done" and not off_driver.saved
+
+    rescue = naive + [
+        {"kind": "type", "target": 1, "text": "Ada Lovelace"},
+        {"kind": "click", "target": 2},
+        {"kind": "done", "summary": "filed, reference CONF-2026"},
+    ]
+    driver = _ApplicationDriver(_V115_URL)
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(rescue),
+        approver=lambda a: True,
+        trail=trail,
+        validate=True,
+    ).run(_V115_GOAL)
+    assert report.stop_reason == "done", report.summary
+    assert driver.saved
+    verdicts = [e for e in trail.events if e["type"] == "validation"]
+    assert [v["ok"] for v in verdicts] == [False, True]
+    assert verify_trail(trail.events)["ok"]
+    return True
+
+
+def case_v115_validation_control():
+    # The control: a correct flow satisfies the checklist at the
+    # first done claim — one validation, passed, no loop-back.
+    steps = [
+        {"kind": "type", "target": 1, "text": "Ada Lovelace"},
+        {"kind": "click", "target": 2},
+        {"kind": "done", "summary": "filed, reference CONF-2026"},
+    ]
+    driver = _ApplicationDriver(_V115_URL)
+    trail = Trail()
+    report = Runner(
+        driver,
+        ScriptedDecider(steps),
+        approver=lambda a: True,
+        trail=trail,
+        validate=True,
+    ).run(_V115_GOAL)
+    assert report.stop_reason == "done", report.summary
+    assert driver.saved
+    verdicts = [e for e in trail.events if e["type"] == "validation"]
+    assert len(verdicts) == 1 and verdicts[0]["ok"]
+    assert report.validation_failures == 0
+    return True
+
+
 CASES = [
     ("map: button text parsed", case_map_button),
     ("map: link href captured", case_map_link_href),
@@ -3743,6 +3862,8 @@ CASES = [
     ("v1.13 effect feedback: the typed value renders in the next map and moves its signature; a typed password never renders; a typed card renders masked", case_v113_effect_feedback),
     ("v1.14 content visibility: the towns page's only element is a Back link, but its page-text excerpt carries the founding year", case_v114_content_visibility),
     ("v1.14 extract progress: novel extract results on an unchanging map reset the stuck counter; the run finishes", case_v114_extract_progress),
+    ("v1.15 premature-done trap: a success banner with nothing filed fools the old counting; the checklist's code-checked reference rejects the done and the run files for real", case_v115_premature_done_trap),
+    ("v1.15 validation control: a correct flow satisfies the checklist at the first done claim, no loop-back", case_v115_validation_control),
 ]
 
 

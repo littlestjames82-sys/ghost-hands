@@ -19,6 +19,7 @@ from .governor import Policy
 from .policies import load_pack, pack_names
 from .runner import Runner
 from .trail import Trail, read_trail
+from .validator import validate_enabled
 
 
 def _print_report(report, trail: Trail) -> None:
@@ -176,6 +177,7 @@ def cmd_run(args) -> int:
         start_url=start if args.driver in ("chromium", "android", "simphone") else None,
         plan_cache=plan_cache,
         require_verify=bool(getattr(args, "require_verify", False)),
+        validate=validate_enabled(bool(getattr(args, "validate", False))),
         max_llm_tokens=getattr(args, "max_llm_tokens", None),
         recovery_attempts=int(getattr(args, "recovery_attempts", 1)),
         initial_history=initial_history,
@@ -297,6 +299,7 @@ def cmd_batch(args) -> int:
                 trail=trail,
                 start_url=start if shared_driver is not None else None,
                 require_verify=bool(getattr(args, "require_verify", False)),
+                validate=validate_enabled(bool(getattr(args, "validate", False))),
                 max_llm_tokens=getattr(args, "max_llm_tokens", None),
             )
             try:
@@ -782,6 +785,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="apply the require-verify gate to every script",
     )
     p_batch.add_argument(
+        "--validate",
+        action="store_true",
+        help="apply the evidence-checklist validator (v1.15) to every "
+        "script: a 'done' must satisfy the goal's checklist against "
+        "cited evidence, exact values checked in code (or set "
+        "GHOST_HANDS_VALIDATE=1)",
+    )
+    p_batch.add_argument(
         "--policy-pack",
         help="named policy pack applied to every script",
     )
@@ -868,6 +879,15 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="reject a script's 'done' until a verify step has passed "
         "in the same run (v1.2): success must be proven, not claimed",
+    )
+    p_run.add_argument(
+        "--validate",
+        action="store_true",
+        help="gate 'done' on the evidence-checklist validator "
+        "(v1.15): the goal is decomposed into checkable items, exact "
+        "values are compared in code against the page and results, "
+        "and an unsatisfied item sends the run back to work instead "
+        "of accepting the claim (or set GHOST_HANDS_VALIDATE=1)",
     )
     p_run.add_argument(
         "--resume",

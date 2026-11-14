@@ -57,6 +57,21 @@ net / download) land in the record under the current step. Raw
 coordinate clicks (``click_at``) are marked ``raw: true`` on their
 execute events, and structured extract results are attached to their
 result events as parsed ``data``.
+
+Evidence-checklist validation (v1.15, P1-4): with ``validate`` on
+(Runner argument, or GHOST_HANDS_VALIDATE on the CLI/MCP surfaces),
+the require-verify idea grows into a checklist gate — see
+validator.py for the full design. The goal is decomposed into
+checkable items at the first ``done`` claim; every claim is then
+evaluated item by item against the perception render and the run's
+results, with exact values decided in code. An unsatisfied item is
+not a failure: the objections go back to the decider (the
+recovery-nudge shape) and the run returns to work. Only after
+``validation_attempts`` failed validations does the run stop, with
+the distinct honest reason ``unverified`` and the never-satisfied
+items named in the summary. Checklist and verdicts are trail
+events, so the record shows *why* a done was accepted or sent
+back. Off (the default), nothing changes.
 """
 
 from __future__ import annotations
@@ -76,11 +91,15 @@ from .eyes import ElementMap
 from .governor import ASK, Decision, Governor, Policy
 from .secrets import SecretProvider, action_secret_refs, resolve_action, scrub_text
 from .trail import Trail
+from .validator import Verdict, validator_for
 from .verify import evaluate_verify
 
 Approver = Callable[[Action], bool]
 
-STOP_REASONS = ("done", "budget", "denied", "stuck", "error")
+# v1.15: "unverified" joins the honest stop reasons — a run whose
+# done claims never satisfied the evidence checklist stops as
+# unverified, distinctly from done and from error.
+STOP_REASONS = ("done", "budget", "denied", "stuck", "error", "unverified")
 
 
 @dataclass
@@ -108,6 +127,10 @@ class RunReport:
     # time — the same numbers report.summarize() shows.
     heals: int = 0
     error_recoveries: int = 0
+    # v1.15: evidence-checklist validations run at done claims, and
+    # how many of them failed — counted off the trail at stop time.
+    validations: int = 0
+    validation_failures: int = 0
 
     def to_dict(self) -> dict:
         return {
@@ -126,6 +149,8 @@ class RunReport:
             "llm_retries": self.llm_retries,
             "heals": self.heals,
             "error_recoveries": self.error_recoveries,
+            "validations": self.validations,
+            "validation_failures": self.validation_failures,
         }
 
 
@@ -151,6 +176,9 @@ class Runner:
         heal_attempts: int = 2,
         error_recovery_attempts: int = 1,
         quiet_wait: bool = True,
+        validate: bool = False,
+        validator=None,
+        validation_attempts: int = 3,
     ) -> None:
         self.driver = driver
         self.decider = decider
@@ -192,6 +220,20 @@ class Runner:
         # disables; GHOST_HANDS_QUIET=0 disables regardless. Drivers
         # without the hook (fake/sim) make this a no-op.
         self.quiet_wait = quiet_wait
+        # v1.15 (P1-4): the evidence-checklist validator. Opt-in,
+        # following the require-verify precedent; the CLI/MCP
+        # surfaces OR in GHOST_HANDS_VALIDATE (see validator.py).
+        # ``validator`` pins an explicit Validator (tests, bench);
+        # otherwise the run resolves one from the decider at the
+        # first done claim — LLMValidator over an LLM decider's own
+        # client, the deterministic code validator otherwise.
+        # ``validation_attempts`` caps FAILED validations before the
+        # honest ``unverified`` stop (mirrors the require-verify
+        # gate's 3-rejection shape).
+        self.validate = validate
+        self.validator = validator
+        self.validation_attempts = max(1, validation_attempts)
+        self._resolved_validator = None
         # v1.2: queued remainder of a decider batch (see decide_batch).
         self._batch_queue: list[Action] = []
         if isinstance(secrets, SecretProvider):
@@ -290,6 +332,73 @@ class Runner:
         done_rejections = 0  # require_verify gate: dones sent back
         recovery_left = self.recovery_attempts
         error_recovery_left = self.error_recovery_attempts
+        # v1.15: the evidence checklist (built lazily at the first
+        # done claim — decomposition is goal-only, so runs that
+        # never claim completion never pay for it) and the count of
+        # failed validations spent so far.
+        checklist_items: Optional[list] = None
+        validation_failures = 0
+
+        def run_validation(step_no: int, rendered_map: str) -> Verdict:
+            """v1.15: evaluate the checklist at a done claim. Builds
+            the checklist on first use and records it; records every
+            verdict. Evidence is the current perception render plus
+            the run's accumulated results. A validator that raises
+            verifies nothing: the exception becomes a failed verdict
+            (counted toward the cap), never a silent pass."""
+            nonlocal checklist_items
+            if self._resolved_validator is None:
+                self._resolved_validator = validator_for(
+                    self.decider, self.validator
+                )
+            active = self._resolved_validator
+
+            def usage_fields(usage: object) -> dict[str, Any]:
+                if not isinstance(usage, dict) or not usage.get("calls"):
+                    return {}
+                return {
+                    "llm_prompt_tokens": int(usage.get("prompt_tokens") or 0),
+                    "llm_completion_tokens": int(
+                        usage.get("completion_tokens") or 0
+                    ),
+                    "llm_calls": int(usage.get("calls") or 0),
+                }
+
+            try:
+                if checklist_items is None:
+                    checklist_items = active.build_checklist(goal)
+                    self.trail.record(
+                        "checklist",
+                        step_no,
+                        items=[item.to_dict() for item in checklist_items],
+                        source=type(active).__name__,
+                        degraded=bool(
+                            getattr(active, "checklist_degraded", False)
+                        ),
+                        **usage_fields(getattr(active, "last_usage", None)),
+                    )
+                verdict = active.check(
+                    goal,
+                    checklist_items,
+                    rendered_map,
+                    list(report.results),
+                )
+            except Exception as exc:
+                verdict = Verdict(
+                    ok=False,
+                    items=[],
+                    objections=[f"validator error: {exc}"],
+                )
+            self.trail.record(
+                "validation",
+                step_no,
+                ok=verdict.ok,
+                attempt=validation_failures + 1,
+                items=[iv.to_dict() for iv in verdict.items],
+                objections=verdict.objections,
+                **usage_fields(verdict.usage),
+            )
+            return verdict
 
         def try_recover(step_no: int, reason: str) -> bool:
             """v1.3: spend a recovery chance on a stuck run. Resets the
@@ -620,6 +729,50 @@ class Runner:
                     }
                 )
                 continue
+            if action.kind == "done" and self.validate:
+                # v1.15 evidence-checklist gate: a done claim must
+                # satisfy the checklist against cited evidence —
+                # exact values decided in code (see validator.py).
+                # An unsatisfied item loops the run back to work
+                # with the objections, the recovery-nudge shape; it
+                # is not a failure. Only a run that exhausts its
+                # validation attempts stops, as "unverified".
+                verdict = run_validation(step, rendered)
+                if not verdict.ok:
+                    validation_failures += 1
+                    detail = "; ".join(verdict.objections) or (
+                        "checklist items unsatisfied"
+                    )
+                    self.trail.record(
+                        "result",
+                        step,
+                        ok=False,
+                        result=f"done rejected by validator: {detail}",
+                    )
+                    if validation_failures >= self.validation_attempts:
+                        unsatisfied = [
+                            iv.text for iv in verdict.items if not iv.satisfied
+                        ] or ["(validator error)"]
+                        return self._stop(
+                            report,
+                            step,
+                            "unverified",
+                            "done claimed but the evidence checklist "
+                            f"failed {validation_failures} validation(s); "
+                            "items never satisfied: "
+                            + "; ".join(unsatisfied),
+                        )
+                    history.append(
+                        {
+                            "kind": "system",
+                            "note": "done rejected by the "
+                            "evidence-checklist validator. Unsatisfied "
+                            f"items: {detail}. Produce the missing "
+                            "evidence (on the page or in a result), "
+                            "then claim done again.",
+                        }
+                    )
+                    continue
             if action.kind == "done":
                 self._cache_finish(
                     goal,
@@ -1025,6 +1178,16 @@ class Runner:
             1
             for ev in self.trail.events
             if ev.get("type") == "error_recovery"
+        )
+        # v1.15: validation totals, counted off the trail like the
+        # heal/recovery numbers above.
+        report.validations = sum(
+            1 for ev in self.trail.events if ev.get("type") == "validation"
+        )
+        report.validation_failures = sum(
+            1
+            for ev in self.trail.events
+            if ev.get("type") == "validation" and not ev.get("ok")
         )
         if report.steps == 0:
             report.steps = acct["steps"]

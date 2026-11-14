@@ -341,6 +341,50 @@ class OpenAICompatibleDecider:
         the batch is a cost optimization, never a governance bypass."""
         return self._request_actions(goal, element_map, history, want_batch=True)
 
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        """v1.15: one raw completion on this decider's own endpoint
+        and model, through a SEPARATE prompt carrying none of the
+        acting conversation (no history, no action schema). The
+        evidence-checklist validator (validator.py) calls it, so the
+        check is an independent judgment that happens to share the
+        client — and the usage ledger: validation tokens accumulate
+        into self.usage exactly like decision tokens, where the
+        run's totals and budget cap see them."""
+        body = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": 0,
+        }
+        if self.json_mode:
+            body["response_format"] = {"type": "json_object"}
+        data = json.dumps(body).encode("utf-8")
+
+        def make_request():
+            return urllib.request.Request(
+                f"{self.base_url}/chat/completions",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {self.api_key}",
+                },
+                method="POST",
+            )
+
+        payload = _post_json(make_request, self.timeout, self.usage)
+        usage = payload.get("usage") or {}
+        self.usage["calls"] += 1
+        for key in ("prompt_tokens", "completion_tokens"):
+            value = usage.get(key)
+            if isinstance(value, int) and value >= 0:
+                self.usage[key] += value
+        try:
+            return payload["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            raise HandsError(f"unexpected completion response shape: {exc}") from exc
+
     def _request_actions(
         self, goal: str, element_map: ElementMap, history: list[dict], want_batch: bool
     ) -> list[Action]:
@@ -503,6 +547,55 @@ class AnthropicDecider:
     ) -> list[Action]:
         return self._request_actions(goal, element_map, history, want_batch=True)
 
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        """v1.15: one raw completion on this decider's own endpoint
+        and model, through a SEPARATE prompt carrying none of the
+        acting conversation — the validator's independent channel
+        (see OpenAICompatibleDecider.complete). Usage folds into
+        self.usage with the Anthropic token spellings mapped."""
+        body = {
+            "model": self.model,
+            "max_tokens": 1024,
+            "temperature": 0,
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": user_prompt}],
+        }
+        data = json.dumps(body).encode("utf-8")
+
+        def make_request():
+            return urllib.request.Request(
+                f"{self.base_url}/v1/messages",
+                data=data,
+                headers={
+                    "Content-Type": "application/json",
+                    "x-api-key": self.api_key,
+                    "anthropic-version": "2023-06-01",
+                },
+                method="POST",
+            )
+
+        payload = _post_json(make_request, self.timeout, self.usage)
+        usage = payload.get("usage") or {}
+        self.usage["calls"] += 1
+        for ours, theirs in (
+            ("prompt_tokens", "input_tokens"),
+            ("completion_tokens", "output_tokens"),
+        ):
+            value = usage.get(theirs)
+            if isinstance(value, int) and value >= 0:
+                self.usage[ours] += value
+        try:
+            content = "".join(
+                block.get("text", "")
+                for block in payload["content"]
+                if isinstance(block, dict) and block.get("type") == "text"
+            )
+        except (KeyError, TypeError) as exc:
+            raise HandsError(f"unexpected completion response shape: {exc}") from exc
+        if not content:
+            raise HandsError("completion returned no text content")
+        return content
+
     def _request_actions(
         self, goal: str, element_map: ElementMap, history: list[dict], want_batch: bool
     ) -> list[Action]:
@@ -594,6 +687,26 @@ class FallbackDecider:
         except HandsError:
             self.failovers += 1
             return self.fallback.decide(goal, element_map, history)
+
+    def complete(self, system_prompt: str, user_prompt: str) -> str:
+        """v1.15: raw completions fail over like decisions do, so a
+        FallbackDecider can serve the validator's independent
+        channel. A side without complete() is skipped; when neither
+        side offers one, the call fails honestly."""
+        errors = []
+        for side in (self.primary, self.fallback):
+            fn = getattr(side, "complete", None)
+            if fn is None:
+                continue
+            try:
+                return fn(system_prompt, user_prompt)
+            except HandsError as exc:
+                self.failovers += 1
+                errors.append(str(exc))
+        raise HandsError(
+            "no side of the fallback decider completed the request"
+            + (f": {'; '.join(errors)}" if errors else " (no complete() offered)")
+        )
 
     def decide_batch(self, goal, element_map, history) -> list[Action]:
         def ask(side) -> list[Action]:

@@ -120,6 +120,17 @@ from .runner import RunReport, Runner
 from .secrets import SecretProvider
 from .simphone import SimPhoneDriver
 from .trail import Trail, read_trail, verify_trail
+from .validator import (
+    ChecklistItem,
+    DeterministicValidator,
+    ItemVerdict,
+    LLMValidator,
+    ScriptedValidator,
+    Validator,
+    Verdict,
+    validate_enabled,
+    validator_for,
+)
 from .verify import evaluate_verify
 
 __all__ = [
@@ -129,10 +140,17 @@ __all__ = [
     "BusClient",
     "BusError",
     "Check",
+    "ChecklistItem",
     "ChromiumDriver",
+    "DeterministicValidator",
     "Element",
     "ElementMap",
     "FakeDriver",
+    "ItemVerdict",
+    "LLMValidator",
+    "ScriptedValidator",
+    "Validator",
+    "Verdict",
     "GhostGuardBridgeError",
     "GhostGuardGovernor",
     "Governor",
@@ -164,6 +182,8 @@ __all__ = [
     "read_trail",
     "run_doctor",
     "run_phone_proof",
+    "validate_enabled",
+    "validator_for",
     "verify_trail",
     "__version__",
 ]

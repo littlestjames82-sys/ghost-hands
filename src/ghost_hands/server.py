@@ -36,6 +36,7 @@ from .governor import Policy
 from .report import summarize
 from .runner import Runner
 from .trail import Trail, verify_trail
+from .validator import validate_enabled
 
 MAX_BODY_BYTES = 1_000_000
 
@@ -143,6 +144,7 @@ def make_server(
                 trail=trail,
                 start_url=start_url,
                 require_verify=bool(body.get("require_verify")),
+                validate=validate_enabled(bool(body.get("validate"))),
             )
             try:
                 report = runner.run(goal)

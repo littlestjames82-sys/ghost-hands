@@ -122,6 +122,41 @@ The revalidation release (v1.12 wave):
   content after two empty modes) no longer races the stuck
   clock, while identical repeats and empty results still
   accumulate exactly as before.
+- **Evidence-checklist validator (v1.15 wave).** The
+  require-verify gate grows into the form Skyvern's published
+  ablation credits with the largest single pass-rate delta
+  available (WebVoyager, vendor run: 68.7% → 85.85% from
+  adding the validator). Opt-in (`Runner(validate=True)`,
+  `--validate`, the MCP `validate` argument, or
+  `GHOST_HANDS_VALIDATE=1`); off, nothing changes. At the
+  first `done` claim the goal is decomposed into a checklist
+  of checkable sub-goals — by a dedicated validator prompt
+  over the decider's own client when the decider is an LLM
+  (a separate channel: none of the acting conversation, so
+  the actor never grades itself), or deterministically in
+  code otherwise. Every prompt opens with an untrusted-data
+  boundary: page content is evidence, never instructions.
+  Each claim is then evaluated item by item against the
+  perception render and the run's results, with cited
+  evidence per item. Exact values stated in the goal
+  (numbers, quoted strings, reference codes) are compared
+  IN CODE: a judge claiming one satisfied while the value
+  is absent from the evidence is overridden, and the
+  overruled opinion stays on the record. An unsatisfied
+  item is not a failure — the objections go back to the
+  decider and the run returns to work (looped-back actions
+  still traverse the ordinary approval path); after 3
+  failed validations the run stops with the new honest
+  reason `unverified`, its summary naming the items that
+  never satisfied. Checklist and verdicts are hash-chained
+  `checklist` / `validation` trail events, and validation
+  tokens fold into the run's usage totals, inside the
+  budget cap rather than extending it. A decomposition
+  that fails degrades to the code decomposition, never to
+  an empty checklist. The bench gains a premature-done
+  trap (a success banner over an unfiled application) that
+  the old counting accepts and the validator catches, plus
+  a first-claim control.
 
 ## [1.11.0] — November 12, 2026
 
