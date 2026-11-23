@@ -2,6 +2,7 @@
 
 [![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
+[![Total downloads](https://static.pepy.tech/badge/ghost-hands)](https://pepy.tech/project/ghost-hands)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Release](https://img.shields.io/github/v/release/littlestjames82-sys/ghost-hands)](https://github.com/littlestjames82-sys/ghost-hands/releases/tag/v0.3.0)
 [![CI](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml/badge.svg)](https://github.com/littlestjames82-sys/ghost-hands/actions/workflows/ci.yml)
@@ -811,6 +812,13 @@ What is proven, and what is not — as of v0.6.0 (Oct 8, 2026):
   `.github/workflows/pages.yml`.
 - `LAUNCH.md` — the launch runbook and copy pack, as written at launch.
 - `PLAN.md` — the field survey and design notes the build started from.
+
+## Also from Ghost Developer Studio
+
+- **PIP**: reviews the developer from their own git history, with grades and a report card. `pip install on-a-pip`
+- **Snap Judgment**: judges your screenshots folder from file metadata only, with a courtroom verdict. `pip install snap-judgment`
+- **Dead Projects Society**: builds a graveyard for your abandoned git projects, tombstones and all. `pip install dead-projects-society`
+- **Agent Seatbelt**: guardrails for AI coding agents, gating tool calls before they run. `pip install ghost-seatbelt`
 
 ## License
 
