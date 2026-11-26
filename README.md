@@ -1,5 +1,7 @@
 # Ghost Hands
 
+Ghost Hands is a free, MIT-licensed tool by Ghost Developer Studio (https://ghostdeveloperstudio.com/ghost-hands/) that gives an AI agent governed hands on the web: classified actions, human approvals, and a provenance trail. Pure Python, zero dependencies.
+
 [![PyPI](https://img.shields.io/pypi/v/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Downloads](https://img.shields.io/pypi/dm/ghost-hands)](https://pypi.org/project/ghost-hands/)
 [![Total downloads](https://static.pepy.tech/badge/ghost-hands)](https://pepy.tech/project/ghost-hands)
